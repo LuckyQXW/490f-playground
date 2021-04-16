@@ -1,3 +1,10 @@
+/*
+ * Adapted from CrossFadeRGB example by Jon E. Froehlich
+ * @jonfroehlich
+ * http://makeabilitylab.io
+ * 
+ * RGB to HSL conversion library from https://github.com/ratkins/RGBConverter
+ */
 #include "src/RGBConverter/RGBConverter.h"
 
 const int RGB_RED_PIN = 3;
@@ -63,6 +70,14 @@ void loop() {
   delay(DELAY_MS);
 }
 
+/**
+ * setColor takes in values between 0 - 255 for the amount of red, green, and blue, respectively
+ * where 255 is the maximum amount of that color and 0 is none of that color. You can illuminate
+ * all colors by intermixing different combinations of red, green, and blue. 
+ * 
+ * This function is based on https://gist.github.com/jamesotron/766994
+ * 
+ */
 void setColor(int red, int green, int blue)
 {
   // If a common anode LED, invert values
