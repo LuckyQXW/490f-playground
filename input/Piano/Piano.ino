@@ -20,10 +20,8 @@ const int BUTTON_PIN7 = 11;
 const int BUTTON_PIN8 = 12;
 const int OUTPUT_LED_PIN = LED_BUILTIN;
 const int FADE_LED_PIN = 3;
-const int MAXOUT = 255;
 
 boolean _buttonsAreActiveLow = true;
-boolean _fading = true;
 FadeDown _ledFadeDown(FADE_LED_PIN, 5, 2);
 
 void setup() {
@@ -71,16 +69,9 @@ void loop() {
   } else {
     noTone(OUTPUT_PIEZO_PIN);
     digitalWrite(OUTPUT_LED_PIN, LOW);
-    if (!_fading) {
-      // Need to reset the state in my FadeDown object
-      _fading = true;
-      _ledFadeDown.setBrightness(MAXOUT);
-      _ledFadeDown.setLastToggledTimestampMs(millis());
-    }
+    _ledFadeDown.startFade();
   }
-  if (_fading) {
-    _ledFadeDown.update();
-  }
+  _ledFadeDown.update();
 }
 
 boolean pressed(int pin) {
@@ -88,13 +79,11 @@ boolean pressed(int pin) {
   Serial.println(btnVal);
   if (_buttonsAreActiveLow && btnVal == LOW) {
     digitalWrite(OUTPUT_LED_PIN, HIGH);
-    analogWrite(FADE_LED_PIN, MAXOUT);
-    _fading = false;
+    _ledFadeDown.setToMax();
     return true;
   } else if (!_buttonsAreActiveLow && btnVal == HIGH) {
     digitalWrite(OUTPUT_LED_PIN, HIGH);
-    analogWrite(FADE_LED_PIN, MAXOUT);
-    _fading = false;
+    _ledFadeDown.setToMax();
     return true;
   }
   return false;
