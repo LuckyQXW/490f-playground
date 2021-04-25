@@ -18,7 +18,7 @@ const int COMMON_ANODE = false;
 RGBConverter _rgbConverter;
 float _hue = 0;
 float _saturation = 1;
-float _lightness = 0.2;
+float _lightness = 0.5;
 float _step = 0.05f;
 float _hueStep = 0.2f;
 
