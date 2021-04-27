@@ -64,28 +64,38 @@ void loop() {
   int lightVal = analogRead(PHOTO_PIN);
   _lightness = 0.5 - lightVal * PHOTO_TO_LIGHTNESS;
   if (_mode == 0) {
-    // Cross fade mode
-    _step = 0.001f;
-    updateColor();
-    delay(DELAY_MS);
+    updateCrossFadeMode();
   } else if (_mode == 1) {
-    // Variable resistance mode
-    int varInput = analogRead(VARIABLE_PIN);
-    if (varInput > 0) {
-      int index = varInput / 100;
-      if (index >= 0 && index <= 2) {
-        _lastSelectedColor = index;
-      }
-      setColorInHsl(_varHue[_lastSelectedColor]);
-    }
-    delay(DELAY_MS);
+    updateLofiInputMode();
   } else {
-    // Tap mode
-    if (getTap()) {
-      // Change hue with bigger increments
-      _step = 0.1f;
-      updateColor();
+    updateTapMode();
+  }
+}
+
+void updateCrossFadeMode() {
+  // Cross fade mode
+  _step = 0.001f;
+  updateColor();
+  delay(DELAY_MS);
+}
+
+void updateLofiInputMode() {
+  int varInput = analogRead(VARIABLE_PIN);
+  if (varInput > 0) {
+    int index = varInput / 100;
+    if (index >= 0 && index <= 2) {
+      _lastSelectedColor = index;
     }
+    setColorInHsl(_varHue[_lastSelectedColor]);
+  }
+  delay(DELAY_MS);
+}
+
+void updateTapMode() {
+  if (getTap()) {
+    // Change hue with bigger increments
+    _step = 0.1f;
+    updateColor();
   }
 }
 
