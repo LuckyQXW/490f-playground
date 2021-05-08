@@ -58,7 +58,7 @@ class Paddle : public Rectangle {
 const int PADDLE_WIDTH = 16;
 const int PADDLE_HEIHT = 4;
 Paddle _paddle(SCREEN_WIDTH / 2 - PADDLE_WIDTH / 2, SCREEN_HEIGHT - PADDLE_HEIHT, PADDLE_WIDTH, PADDLE_HEIHT);
-int _paddleSpeed = 2;
+int _paddleSpeed = 3;
 
 class Brick : public Rectangle {
   protected:
@@ -69,7 +69,7 @@ class Brick : public Rectangle {
     {
     }
 
-    bool getBroken() {
+    bool isBroken() {
       return _broken;
     }
 
@@ -82,10 +82,27 @@ const int BRICK_HEIGHT = 4;
 const int BRICK_GAP = 1;
 const int NUM_ROWS = 2;
 const int NUM_BRICK_PER_ROW = 8;
-Rectangle **_bricks;
+Brick **_bricks;
 
+class BrickBall : public Ball {
+  protected:
+    bool _active = false;
+
+  public:
+    BrickBall(int xCenter, int yCenter, int radius) : Ball(xCenter, yCenter, radius) {
+    }
+
+    bool isActive() {
+      return _active;
+    }
+
+    bool setActive(bool active) {
+      _active = active;
+    }
+};
 const int BALL_RADIUS = 2;
-Ball _ball(SCREEN_WIDTH / 2, SCREEN_HEIGHT / 2, 2);
+BrickBall _ball(SCREEN_WIDTH / 2, SCREEN_HEIGHT / 2, 2);
+int _ballYSpeed = 1;
 
 enum GameState {
   NEW_GAME,
@@ -100,6 +117,8 @@ void setup() {
 
   pinMode(LEFT_BTN_PIN, INPUT_PULLUP);
   pinMode(RIGHT_BTN_PIN, INPUT_PULLUP);
+  
+  randomSeed(analogRead(A5));
 
   initializeOledAndShowLoadScreen();
   initializeGameEntities();
@@ -114,7 +133,6 @@ void loop() {
   int yMovementPixels = map(upDownVal, 0, _analogJoystick.getMaxAnalogValue() + 1, -4, 5);
   int xMovementPixels = map(leftRightVal, 0, _analogJoystick.getMaxAnalogValue() + 1, -10, 11);
   int btnVal = digitalRead(LEFT_BTN_PIN);
-  Serial.println(leftRightVal);
   if (_gameState == NEW_GAME) {
     if (xMovementPixels < 0) {
       _gameModeIdx = max(0, _gameModeIdx - 1);
@@ -123,6 +141,7 @@ void loop() {
     }
     showMenu();
     if (btnVal == LOW) {
+      resetGameEntities();
       _gameState = PLAYING;
     }
   } else if (_gameState == PLAYING) {
@@ -139,7 +158,7 @@ void loop() {
   
   _display.display();
   if(DELAY_LOOP_MS > 0){
-    //delay(DELAY_LOOP_MS);
+    delay(DELAY_LOOP_MS);
   }
 }
 
@@ -187,14 +206,15 @@ void initializeGameEntities() {
 
   // ball set up
   _ball.setDrawFill(true);
+  _ball.setCenter(_paddle.getX() + _paddle.getWidth() / 2, _paddle.getY() - _ball.getRadius() - 1);
 
   // bricks set up
-  _bricks = new Rectangle*[NUM_ROWS * NUM_BRICK_PER_ROW];
+  _bricks = new Brick*[NUM_ROWS * NUM_BRICK_PER_ROW];
   int brickY = 0;
   int brickX = 0;
   for (int i = 0; i < NUM_ROWS; i++) {
     for (int j = 0; j < NUM_BRICK_PER_ROW; j++) {
-      _bricks[i * NUM_BRICK_PER_ROW + j] = new Rectangle(brickX, brickY, BRICK_WIDTH, BRICK_HEIGHT);
+      _bricks[i * NUM_BRICK_PER_ROW + j] = new Brick(brickX, brickY, BRICK_WIDTH, BRICK_HEIGHT);
       _bricks[i * NUM_BRICK_PER_ROW + j]->setDrawFill(true);
       brickX += BRICK_GAP + BRICK_WIDTH;
     }
@@ -203,21 +223,69 @@ void initializeGameEntities() {
   }
 }
 
-void playLoop(int leftRightVal) {
-  if (leftRightVal < 0) {
-      _paddle.setX(_paddle.getX() - _paddleSpeed);
-  } else if (leftRightVal > 0) {
-    _paddle.setX(_paddle.getX() + _paddleSpeed);
+void resetGameEntities() {
+  for (int i = 0; i < NUM_ROWS * NUM_BRICK_PER_ROW; i++) {
+    Brick *brick = _bricks[i];
+    brick->setBroken(false);
   }
+
+  _paddle.setX(SCREEN_WIDTH / 2 - PADDLE_WIDTH / 2);
+  _paddle.setY(SCREEN_HEIGHT - PADDLE_HEIHT);
+
+  _ball.setActive(false);
+  _ball.setSpeed(0, 0);
+  _ball.setCenter(_paddle.getX() + _paddle.getWidth() / 2, _paddle.getY() - _ball.getRadius() - 1);
+}
+
+void playLoop(int leftRightVal) {
+  int btnVal = digitalRead(RIGHT_BTN_PIN);
+  int pSpeed = 0;
+  bool hasUnbrokenBrick = false;
+  if (leftRightVal < 0) {
+    pSpeed = -_paddleSpeed;  
+  } else if (leftRightVal > 0) {
+    pSpeed = _paddleSpeed;
+  }
+  
+  _paddle.setX(_paddle.getX() + pSpeed);
   _paddle.forceInside(0, 0, _display.width(), _display.height());
   _paddle.draw(_display);
+  
+  if (!_ball.isActive()) {
+    _ball.setCenter(_paddle.getX() + _paddle.getWidth() / 2, _paddle.getY() - _ball.getRadius() - 1);
+  } else {
+    if (_ball.overlaps(_paddle)) {
+      _ball.reverseYSpeed();
+      _ball.setSpeed(constrain(_ball.getXSpeed() + pSpeed, -3, 3), _ball.getYSpeed());
+    } else if (_ball.checkYBounce(0, SCREEN_HEIGHT - 2 * _ball.getRadius() + 1)) {
+      _ball.reverseYSpeed();
+    }
+    if (_ball.checkXBounce(0, SCREEN_WIDTH - 2 * _ball.getRadius())) {
+      _ball.reverseXSpeed();
+    }
+    _ball.update();
+  }
+    
+  if (!_ball.isActive() && btnVal == LOW) {
+    _ball.setActive(true);
+    _ball.setSpeed(random(-5, 5), -_ballYSpeed);
+  }
 
   for (int i = 0; i < NUM_ROWS * NUM_BRICK_PER_ROW; i++) {
-    Rectangle *brick = _bricks[i];
-    brick->draw(_display);
+    Brick *brick = _bricks[i];
+    if (brick->overlaps(_ball) && !brick->isBroken()) {
+      brick->setBroken(true);
+      _ball.reverseYSpeed();
+    }
+    if (!brick->isBroken()) {
+      brick->draw(_display);
+      hasUnbrokenBrick = true;
+    }
   }
-  if(DELAY_LOOP_MS > 0){
-    delay(DELAY_LOOP_MS);
+  
+  _ball.draw(_display);
+  if (!hasUnbrokenBrick) {
+    _gameState = GAME_OVER;
   }
 }
 
@@ -276,5 +344,4 @@ void showLoadScreen() {
   delay(LOAD_SCREEN_SHOW_MS);
   _display.clearDisplay();
   _display.setTextSize(1);
-
 }
