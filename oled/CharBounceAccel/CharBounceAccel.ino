@@ -40,10 +40,6 @@ void setup() {
     for (;;); // Don't proceed, loop forever
   }
 
-  // Gets a random long between min and max - 1
-  // https://www.arduino.cc/reference/en/language/functions/random-numbers/random/
-  _xSpeed = random(1, 4);
-  _ySpeed = random(1, 4);
   _x = SCREEN_WIDTH / 2;
   _y = SCREEN_HEIGHT / 2;
 }
