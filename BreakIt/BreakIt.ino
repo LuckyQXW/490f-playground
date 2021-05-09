@@ -4,8 +4,8 @@
 
 #include <Adafruit_GFX.h>
 #include <Adafruit_SSD1306.h>
-// #include <Adafruit_LIS3DH.h>
-// #include <Adafruit_Sensor.h>
+#include <Adafruit_LIS3DH.h>
+#include <Adafruit_Sensor.h>
 #include <ParallaxJoystick.hpp>;
 
 #define SCREEN_WIDTH 128 // OLED display width, in pixels
@@ -15,7 +15,7 @@
 #define OLED_RESET     4 // Reset pin # (or -1 if sharing Arduino reset pin)
 Adafruit_SSD1306 _display(128, 64, &Wire, 4);
 // Declaration for an accelerometer connected to I2C (SDA, SCL pins)
-// Adafruit_LIS3DH lis = Adafruit_LIS3DH();
+Adafruit_LIS3DH lis = Adafruit_LIS3DH();
 
 // Load screen text
 const char STR_LOADSCREEN_APP_NAME_LINE1[] = "Break It!";

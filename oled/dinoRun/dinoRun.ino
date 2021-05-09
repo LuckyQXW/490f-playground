@@ -35,7 +35,7 @@ const int DOWN_BUTTON_INPUT_PIN = 7;
 const int LEFT_BUTTON_INPUT_PIN = 5;
 const int RIGHT_BUTTON_INPUT_PIN = 4;
 
-PushButton jump(UP_BUTTON_INPUT_PIN);
+PushButton jump(LEFT_BUTTON_INPUT_PIN);
 
 class Rock : public Rectangle {
   protected:
