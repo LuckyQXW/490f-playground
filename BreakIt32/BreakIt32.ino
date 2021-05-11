@@ -1,7 +1,15 @@
+#include <pitches.h>
+#include <Tone32.h>
+
+#include <Wire.h>
+#include <SPI.h>
 #include <EEPROM.h>
 #include <Shape.hpp>;
 
+#include <Adafruit_GFX.h>
 #include <Adafruit_SSD1306.h>
+// #include <Adafruit_LIS3DH.h>
+// #include <Adafruit_Sensor.h>
 #include <ParallaxJoystick.hpp>;
 
 #define SCREEN_WIDTH 128 // OLED display width, in pixels
@@ -10,6 +18,8 @@
 // Declaration for an SSD1306 display connected to I2C (SDA, SCL pins)
 #define OLED_RESET     4 // Reset pin # (or -1 if sharing Arduino reset pin)
 Adafruit_SSD1306 _display(128, 64, &Wire, 4);
+// Declaration for an accelerometer connected to I2C (SDA, SCL pins)
+// Adafruit_LIS3DH lis = Adafruit_LIS3DH();
 
 // Load screen text
 const char STR_LOADSCREEN_APP_NAME_LINE1[] = "Break It!";
@@ -36,14 +46,15 @@ int _gameModeIdx = 0;
 const int DELAY_LOOP_MS = 5;
 
 // Button input
-const int LEFT_BTN_PIN = 5;
+const int LEFT_BTN_PIN = 4;
+
 const int TONE_OUTPUT_PIN = 6;
 
 // Joystick input
 const int JOYSTICK_UPDOWN_PIN = A1;
 const int JOYSTICK_LEFTRIGHT_PIN = A0;
 const int MAX_ANALOG_VAL = 1023;
-const enum JoystickYDirection JOYSTICK_Y_DIR = LEFT;
+const enum JoystickYDirection JOYSTICK_Y_DIR = RIGHT;
 
 // Analog joystick
 ParallaxJoystick _analogJoystick(JOYSTICK_UPDOWN_PIN, JOYSTICK_LEFTRIGHT_PIN, MAX_ANALOG_VAL, JOYSTICK_Y_DIR);
@@ -60,18 +71,36 @@ const int MAX_ANALOG_INPUT = 1023;
 // Define game components
 const int PADDLE_WIDTH = 16;
 const int PADDLE_HEIHT = 4;
-Rectangle _paddle(SCREEN_WIDTH / 2 - PADDLE_WIDTH / 2, SCREEN_HEIGHT - PADDLE_HEIHT, PADDLE_WIDTH, PADDLE_HEIHT);
+const Rectangle _paddle(SCREEN_WIDTH / 2 - PADDLE_WIDTH / 2, SCREEN_HEIGHT - PADDLE_HEIHT, PADDLE_WIDTH, PADDLE_HEIHT);
 int _paddleSpeed = 3;
+
+class Brick : public Rectangle {
+  protected:
+    bool _broken = false;
+
+  public:
+    Brick(int x, int y, int width, int height) : Rectangle(x, y, width, height)
+    {
+    }
+
+    bool isBroken() {
+      return _broken;
+    }
+
+    bool setBroken(bool broken) {
+      _broken = broken;
+    }
+};
 
 const int BRICK_WIDTH = 15;
 const int BRICK_HEIGHT = 4;
 const int BRICK_GAP = 1;
 const int NUM_ROWS = 3;
 const int NUM_BRICK_PER_ROW = 8;
-bool _broken[NUM_ROWS * NUM_BRICK_PER_ROW];
+Brick **_bricks;
 
 const int BALL_RADIUS = 2;
-Ball _ball(SCREEN_WIDTH / 2, SCREEN_HEIGHT / 2, 2);
+const Ball _ball(SCREEN_WIDTH / 2, SCREEN_HEIGHT / 2, 2);
 int _ballYSpeed = 1;
 bool _ballActive = false;
 
@@ -94,6 +123,14 @@ void setup() {
   pinMode(TONE_OUTPUT_PIN, OUTPUT);
   pinMode(VIBRO_PIN, OUTPUT);
 
+  /*
+  if (!lis.begin(0x18)) {   // change this to 0x19 for alternative i2c address
+    if (!lis.begin(0x19)) {
+      Serial.println("Couldnt start");
+      while (1) yield();
+    }
+  }*/
+  
   randomSeed(analogRead(A5));
 
   initializeOledAndShowLoadScreen();
@@ -186,6 +223,20 @@ void initializeGameEntities() {
   // ball set up
   _ball.setDrawFill(true);
   _ball.setCenter(_paddle.getX() + _paddle.getWidth() / 2, _paddle.getY() - _ball.getRadius() - 1);
+
+  // bricks set up
+  _bricks = new Brick*[NUM_ROWS * NUM_BRICK_PER_ROW];
+  int brickY = 8;
+  int brickX = 0;
+  for (int i = 0; i < NUM_ROWS; i++) {
+    for (int j = 0; j < NUM_BRICK_PER_ROW; j++) {
+      _bricks[i * NUM_BRICK_PER_ROW + j] = new Brick(brickX, brickY, BRICK_WIDTH, BRICK_HEIGHT);
+      _bricks[i * NUM_BRICK_PER_ROW + j]->setDrawFill(true);
+      brickX += BRICK_GAP + BRICK_WIDTH;
+    }
+    brickX = 0;
+    brickY += BRICK_GAP + BRICK_HEIGHT;
+  }
 }
 
 void resetGameEntities() {
@@ -197,7 +248,8 @@ void resetGameEntities() {
 
 void resetBricks() {
   for (int i = 0; i < NUM_ROWS * NUM_BRICK_PER_ROW; i++) {
-    _broken[i] = false;
+    Brick *brick = _bricks[i];
+    brick->setBroken(false);
   }
 }
 
@@ -272,30 +324,22 @@ void playLoop(int leftRightVal) {
     _ball.setSpeed(random(-5, 5), -_ballYSpeed);
   }
 
-  // Draw bricks
-  int brickY = 8;
-  int brickX = 0;
-  for (int i = 0; i < NUM_ROWS; i++) {
-    for (int j = 0; j < NUM_BRICK_PER_ROW; j++) {
-      if (!_broken[i * NUM_BRICK_PER_ROW + j]) {
-        if (overlaps(brickX, brickY, BRICK_WIDTH, BRICK_HEIGHT, _ball)) {
-          _broken[i * NUM_BRICK_PER_ROW + j] = true;
-          playBreakBrickSound();
-          _score += 1;
-          if (_ball.getCenterY() >= brickY + BRICK_HEIGHT && _ball.getYSpeed() < 0) {
-            _ball.reverseYSpeed();
-          } else if (_ball.getCenterY() < brickY + BRICK_HEIGHT) {
-            _ball.reverseXSpeed();
-          }
-        } else {
-          hasUnbrokenBrick = true;
-          drawBrick(brickX, brickY, BRICK_WIDTH, BRICK_HEIGHT);
-        }
+  for (int i = 0; i < NUM_ROWS * NUM_BRICK_PER_ROW; i++) {
+    Brick *brick = _bricks[i];
+    if (brick->overlaps(_ball) && !brick->isBroken()) {
+      brick->setBroken(true);
+      _score += 1;
+      playBreakBrickSound();
+      if (_ball.getCenterY() >= brick->getBottom() && _ball.getYSpeed() < 0) {
+        _ball.reverseYSpeed();
+      } else if (_ball.getCenterY() < brick->getBottom()) {
+        _ball.reverseXSpeed();
       }
-      brickX += BRICK_GAP + BRICK_WIDTH;
     }
-    brickX = 0;
-    brickY += BRICK_GAP + BRICK_HEIGHT;
+    if (!brick->isBroken()) {
+      brick->draw(_display);
+      hasUnbrokenBrick = true;
+    }
   }
   
   _ball.draw(_display);
@@ -306,17 +350,6 @@ void playLoop(int leftRightVal) {
     _highScore = max(oldHighscore, _score);
     EEPROM.put(0, _highScore);
   }
-}
-
-void drawBrick(int x, int y, int width, int height) {
-  _display.fillRect(x, y, width, height, SSD1306_WHITE);
-}
-
-bool overlaps(int x, int y, int width, int height, const Shape& ball) {
-  return !(x + width < ball.getX() ||
-           y + height < ball.getY() ||
-           x > ball.getRight() ||
-           y > ball.getBottom());
 }
 
 void showServeInstruction() {
@@ -335,10 +368,10 @@ void playBreakBrickSound() {
 
 void playLoseBallSound() {
   tone(TONE_OUTPUT_PIN, LOSE_BALL_TONE_FREQUENCY, PLAY_TONE_DURATION_MS);
-  analogWrite(VIBRO_PIN, MAX_ANALOG_INPUT);
+  // analogWrite(VIBRO_PIN, MAX_ANALOG_INPUT);
   delay(500);
   tone(TONE_OUTPUT_PIN, LOSE_BALL_TONE_FREQUENCY, PLAY_TONE_DURATION_MS);
-  analogWrite(VIBRO_PIN, 0);
+  // analogWrite(VIBRO_PIN, 0);
 }
 
 /*
