@@ -3,23 +3,25 @@
 
 #include <Wire.h>
 #include <SPI.h>
-#include <EEPROM.h>
+#include <Preferences.h>
 #include <Shape.hpp>;
 
 #include <Adafruit_GFX.h>
 #include <Adafruit_SSD1306.h>
-// #include <Adafruit_LIS3DH.h>
-// #include <Adafruit_Sensor.h>
+#include <Adafruit_LIS3DH.h>
+#include <Adafruit_Sensor.h>
 #include <ParallaxJoystick.hpp>;
 
 #define SCREEN_WIDTH 128 // OLED display width, in pixels
 #define SCREEN_HEIGHT 64 // OLED display height, in pixels
 
+#define EEPROM_SIZE 12
+
 // Declaration for an SSD1306 display connected to I2C (SDA, SCL pins)
 #define OLED_RESET     4 // Reset pin # (or -1 if sharing Arduino reset pin)
 Adafruit_SSD1306 _display(128, 64, &Wire, 4);
 // Declaration for an accelerometer connected to I2C (SDA, SCL pins)
-// Adafruit_LIS3DH lis = Adafruit_LIS3DH();
+Adafruit_LIS3DH lis = Adafruit_LIS3DH();
 
 // Load screen text
 const char STR_LOADSCREEN_APP_NAME_LINE1[] = "Break It!";
@@ -37,43 +39,48 @@ const char STR_ADVANCED[] = "Advanced";
 const char STR_SCOREBOARD[] = "Scoreboard";
 const char STR_YOURSCORE[] = "Your score: ";
 const char STR_HIGHSCORE[] = "High score: ";
-const char STR_CONT[] = "Press A to continue";
+const char STR_CONT[] = "Press A to menu";
 
 // Game text
 const char STR_SERVE[] = "Press A to serve";
 
-int _gameModeIdx = 0;
-const int DELAY_LOOP_MS = 5;
-
 // Button input
 const int LEFT_BTN_PIN = 4;
 
-const int TONE_OUTPUT_PIN = 6;
-
 // Joystick input
-const int JOYSTICK_UPDOWN_PIN = A1;
-const int JOYSTICK_LEFTRIGHT_PIN = A0;
-const int MAX_ANALOG_VAL = 1023;
+const int JOYSTICK_UPDOWN_PIN = A0;
+const int JOYSTICK_LEFTRIGHT_PIN = A1;
+const int MAX_ANALOG_VAL = 3800;
 const enum JoystickYDirection JOYSTICK_Y_DIR = RIGHT;
 
 // Analog joystick
 ParallaxJoystick _analogJoystick(JOYSTICK_UPDOWN_PIN, JOYSTICK_LEFTRIGHT_PIN, MAX_ANALOG_VAL, JOYSTICK_Y_DIR);
 
 // Buzzer output
+const int TONE_OUTPUT_PIN = 16;
 const int COLLISION_TONE_FREQUENCY = 300;
 const int LOSE_BALL_TONE_FREQUENCY = 100;
 const int PLAY_TONE_DURATION_MS = 200;
+unsigned long _collisionStart = 0;
+bool _playingCollision = false;
+unsigned long _loseBallStart = 0;
+bool _playingLoseBall = false;
+
+const int PWM_CHANNEL = 0;    // ESP32 has 16 channels which can generate 16 independent waveforms
+const int PWM_FREQ = 500;     // Recall that Arduino Uno is ~490 Hz. Official ESP32 example uses 5,000Hz
+const int PWM_RESOLUTION = 8; // We'll use same resolution as Uno (8 bits, 0-255) but ESP32 can go up to 16 bits 
 
 // Vibromotor output
-const int VIBRO_PIN = 9;
-const int MAX_ANALOG_INPUT = 1023;
+const int VIBRO_PIN = 32;
 
 // Define game components
+// Paddle
 const int PADDLE_WIDTH = 16;
 const int PADDLE_HEIHT = 4;
-const Rectangle _paddle(SCREEN_WIDTH / 2 - PADDLE_WIDTH / 2, SCREEN_HEIGHT - PADDLE_HEIHT, PADDLE_WIDTH, PADDLE_HEIHT);
+Rectangle _paddle(SCREEN_WIDTH / 2 - PADDLE_WIDTH / 2, SCREEN_HEIGHT - PADDLE_HEIHT, PADDLE_WIDTH, PADDLE_HEIHT);
 int _paddleSpeed = 3;
 
+// Brick
 class Brick : public Rectangle {
   protected:
     bool _broken = false;
@@ -91,47 +98,46 @@ class Brick : public Rectangle {
       _broken = broken;
     }
 };
-
 const int BRICK_WIDTH = 15;
 const int BRICK_HEIGHT = 4;
 const int BRICK_GAP = 1;
-const int NUM_ROWS = 3;
+const int NUM_ROWS = 1;
 const int NUM_BRICK_PER_ROW = 8;
 Brick **_bricks;
 
+// Ball
 const int BALL_RADIUS = 2;
-const Ball _ball(SCREEN_WIDTH / 2, SCREEN_HEIGHT / 2, 2);
+Ball _ball(SCREEN_WIDTH / 2, SCREEN_HEIGHT / 2, 2);
 int _ballYSpeed = 1;
 bool _ballActive = false;
 
+// Game state
 enum GameState {
   NEW_GAME,
   PLAYING,
   GAME_OVER,
 };
-
+Preferences _preferences;
+const int DELAY_LOOP_MS = 5;
+const int INPUT_DELAY_MS = 1000;
 GameState _gameState = NEW_GAME;
-
+int _gameModeIdx = 0;
 int _score = 0;
-
 int _highScore = 0;
 
 void setup() {
   Serial.begin(9600);
 
   pinMode(LEFT_BTN_PIN, INPUT_PULLUP);
-  pinMode(TONE_OUTPUT_PIN, OUTPUT);
   pinMode(VIBRO_PIN, OUTPUT);
+  pinMode(TONE_OUTPUT_PIN, OUTPUT);
+  ledcSetup(PWM_CHANNEL, PWM_FREQ, PWM_RESOLUTION);
+  ledcAttachPin(TONE_OUTPUT_PIN, PWM_CHANNEL);
 
-  /*
   if (!lis.begin(0x18)) {   // change this to 0x19 for alternative i2c address
-    if (!lis.begin(0x19)) {
-      Serial.println("Couldnt start");
-      while (1) yield();
-    }
-  }*/
-  
-  randomSeed(analogRead(A5));
+    Serial.println("Couldnt start");
+    while (1) yield();
+  }
 
   initializeOledAndShowLoadScreen();
   initializeGameEntities();
@@ -139,36 +145,34 @@ void setup() {
 
 void loop() {
   _display.clearDisplay();
+  checkSounds();
+
   // Read analog joystick to control player ball
   _analogJoystick.read();
-  int upDownVal = _analogJoystick.getUpDownVal();
   int leftRightVal = _analogJoystick.getLeftRightVal();
-  int yMovementPixels = map(upDownVal, 0, _analogJoystick.getMaxAnalogValue() + 1, -4, 5);
-  int xMovementPixels = map(leftRightVal, 0, _analogJoystick.getMaxAnalogValue() + 1, -10, 11);
+
   int btnVal = digitalRead(LEFT_BTN_PIN);
   if (_gameState == NEW_GAME) {
-    if (xMovementPixels < 0) {
+    int xMovementPixels = map(leftRightVal, 0, _analogJoystick.getMaxAnalogValue() + 1, -2, 2);
+    if (xMovementPixels > 0) {
       _gameModeIdx = max(0, _gameModeIdx - 1);
-    } else if (xMovementPixels > 0) {
+    } else if (xMovementPixels < 0) {
       _gameModeIdx = min(1, _gameModeIdx + 1);
     }
     showMenu();
     if (btnVal == LOW) {
       resetGameEntities();
       _gameState = PLAYING;
-      delay(1000);
+      delay(INPUT_DELAY_MS);
     }
   } else if (_gameState == PLAYING) {
-    playLoop(xMovementPixels);
+    playLoop();
     drawStatusBar();
-   if (yMovementPixels > 0) {
-      _gameState = GAME_OVER;
-    }
   } else if (_gameState == GAME_OVER) {
     scoreboard();
     if (btnVal == LOW) {
       _gameState = NEW_GAME;
-      delay(1000);
+      delay(INPUT_DELAY_MS);
     }
   }
   
@@ -178,17 +182,18 @@ void loop() {
   }
 }
 
+/**
+ * Displays the select game mode menu
+ */
 void showMenu() {
   // Show select game mode screen
   _display.setTextSize(1);
   _display.setTextColor(WHITE, BLACK);
+
   int16_t x1, y1;
   uint16_t w, h;
-  _display.setTextSize(1);
 
   int yText = 0;
-
-  _display.setTextSize(1);
   _display.getTextBounds(STR_SELECT_GAME_MODE, 0, 0, &x1, &y1, &w, &h);
   _display.setCursor(_display.width() / 2 - w / 2, yText);
   _display.print(STR_SELECT_GAME_MODE);
@@ -201,7 +206,6 @@ void showMenu() {
   if (_gameModeIdx == 0) {
     _display.setTextColor(BLACK, WHITE);
   }
-  _display.setTextSize(1);
   yText = yText + h + 5;
   _display.getTextBounds(STR_BASIC, 0, 0, &x1, &y1, &w, &h);
   _display.setCursor(0, yText);
@@ -216,6 +220,9 @@ void showMenu() {
   _display.print(STR_ADVANCED);
 }
 
+/**
+ * Sets up the game components
+ */
 void initializeGameEntities() {
   // paddle set up
   _paddle.setDrawFill(true);
@@ -239,6 +246,9 @@ void initializeGameEntities() {
   }
 }
 
+/**
+ * Resets all game component states upon new game
+ */
 void resetGameEntities() {
   resetBricks();
   resetPaddle();
@@ -264,66 +274,106 @@ void resetBall() {
   _ball.setCenter(_paddle.getX() + _paddle.getWidth() / 2, _paddle.getY() - _ball.getRadius() - 1);
 }
 
-void playLoop(int leftRightVal) {
-  int btnVal = digitalRead(LEFT_BTN_PIN);
-  int pSpeed = 0;
-  bool hasUnbrokenBrick = false;
-
-  // Decide the actual paddle speed and location based on the joystick value
-  if (leftRightVal < 0) {
-    pSpeed = -_paddleSpeed;
-  } else if (leftRightVal > 0) {
-    pSpeed = _paddleSpeed;
+/**
+ * Runs the main game loop
+ */
+void playLoop() {
+  checkActivateBall();
+  int pSpeed = updateAndGetPaddleSpeed();
+  updateBall(pSpeed);
+  if (!updateBricks()) {
+    _gameState = GAME_OVER;
+    _preferences.begin("scoreRecord", false);
+    int oldHighscore = _preferences.getInt("basic", 0);
+    _highScore = max(oldHighscore, _score);
+    _preferences.putInt("basic", _highScore);
+    _preferences.end();
   }
-  _paddle.setX(_paddle.getX() + pSpeed);
+}
 
-  /*
+/**
+ * Checks for ball activation upon button press
+ * When the ball is not activated, it will go along with the paddle
+ * Upon activated, it will be assigned a random xSpeed 
+ */
+void checkActivateBall() {
+  int btnVal = digitalRead(LEFT_BTN_PIN);
+  if (!_ballActive && btnVal == LOW) {
+    _ballActive = true;
+    _ball.setSpeed(random(-5, 5), -_ballYSpeed);
+  }
+}
+
+/**
+ * Updates the paddle control based on the game mode
+ * Basic (0) uses joystick input
+ * Advanced (1) uses accelerometer input
+ * Returns the padde speed for ball update later
+ */
+int updateAndGetPaddleSpeed() {
+  int pSpeed = 0;
   if (_gameModeIdx == 0) {
+    // Read joystick
+    int leftRightVal = _analogJoystick.getLeftRightVal();
+    int xMovementPixels = map(leftRightVal, 0, _analogJoystick.getMaxAnalogValue() + 1, -10, 10);
     // Decide the actual paddle speed and location based on the joystick value
-    if (leftRightVal < 0) {
-      pSpeed = -_paddleSpeed;  
-    } else if (leftRightVal > 0) {
+    if (xMovementPixels < 0) {
       pSpeed = _paddleSpeed;
+    } else if (xMovementPixels > 0) {
+      pSpeed = -_paddleSpeed;
     }
     _paddle.setX(_paddle.getX() + pSpeed);
   } else {
+    // Read accelerometer
     sensors_event_t event;
     lis.getEvent(&event);
     pSpeed = event.acceleration.x;
     _paddle.setX(_paddle.getX() + event.acceleration.x);
   }
-  */
-
+  
   _paddle.forceInside(0, 0, _display.width(), _display.height());
   _paddle.draw(_display);
-  
+  return pSpeed;
+}
+
+/**
+ * Updates the ball movement
+ */
+void updateBall(int pSpeed) {
   if (!_ballActive) {
     // If the ball is not active yet, make it stick with the paddle
     _ball.setCenter(_paddle.getX() + _paddle.getWidth() / 2, _paddle.getY() - _ball.getRadius() - 1);
     showServeInstruction();
   } else {
-    if (_ball.overlaps(_paddle) && _ball.getBottom() >= _paddle.getTop() && _ball.getYSpeed() > 0) {
-      // When the ball overlaps with the paddle, bounce back up
+    // Check for collision with paddle and wall
+    if (_ball.overlaps(_paddle) && _ball.getCenterY() <= _paddle.getTop() && _ball.getYSpeed() > 0) {
+      // Ball overlaps with the paddle, bounce back up
       _ball.reverseYSpeed();
       _ball.setSpeed(constrain(_ball.getXSpeed() + pSpeed, -3, 3), _ball.getYSpeed());
     } else if (_ball.getTop() <= 8 && _ball.getYSpeed() < 0) {
+      // Ball hits the ceiling, bounce back down
       _ball.reverseYSpeed();
     } else if (_ball.getTop() >= SCREEN_HEIGHT) {
+      // Ball goes off screen from the bottom
       resetBall();
       _score -= 5;
       playLoseBallSound();
     }
+    // Ball hits the wall on left and right
     if (_ball.checkXBounce(0, SCREEN_WIDTH - 2 * _ball.getRadius())) {
       _ball.reverseXSpeed();
     }
     _ball.update();
   }
-    
-  if (!_ballActive && btnVal == LOW) {
-    _ballActive = true;
-    _ball.setSpeed(random(-5, 5), -_ballYSpeed);
-  }
+  _ball.draw(_display);
+}
 
+/**
+ * Updates the state of the bricks
+ * Returns true if all bricks are broken
+ */
+bool updateBricks() {
+  bool hasUnbrokenBrick = false;
   for (int i = 0; i < NUM_ROWS * NUM_BRICK_PER_ROW; i++) {
     Brick *brick = _bricks[i];
     if (brick->overlaps(_ball) && !brick->isBroken()) {
@@ -331,8 +381,10 @@ void playLoop(int leftRightVal) {
       _score += 1;
       playBreakBrickSound();
       if (_ball.getCenterY() >= brick->getBottom() && _ball.getYSpeed() < 0) {
+        // Ball hits the brick from the bottom
         _ball.reverseYSpeed();
-      } else if (_ball.getCenterY() < brick->getBottom()) {
+      } else if (_ball.getTop() < brick->getBottom()) {
+        // Ball hits the brick from the side
         _ball.reverseXSpeed();
       }
     }
@@ -341,17 +393,12 @@ void playLoop(int leftRightVal) {
       hasUnbrokenBrick = true;
     }
   }
-  
-  _ball.draw(_display);
-  if (!hasUnbrokenBrick) {
-    _gameState = GAME_OVER;
-    int oldHighscore = 0;
-    EEPROM.get(0, oldHighscore);
-    _highScore = max(oldHighscore, _score);
-    EEPROM.put(0, _highScore);
-  }
+  return hasUnbrokenBrick;
 }
 
+/**
+ * Shows press A to serve on screen while ball is not activated
+ */
 void showServeInstruction() {
   int16_t x1, y1;
   uint16_t w, h;
@@ -362,16 +409,52 @@ void showServeInstruction() {
   _display.print(STR_SERVE);
 }
 
-void playBreakBrickSound() {
-  tone(TONE_OUTPUT_PIN, COLLISION_TONE_FREQUENCY, PLAY_TONE_DURATION_MS);
+/**
+ * Stops the sounds if they have exceeded the specified duration
+ */
+void checkSounds() {
+  checkBreakBrickSound();
+  checkLoseBallSound();
 }
 
+/**
+ * Plays the brick-breaking sound and start the timer
+ */
+void playBreakBrickSound() {
+  ledcWriteTone(PWM_CHANNEL, COLLISION_TONE_FREQUENCY);
+  _collisionStart = millis();
+  _playingCollision = true;
+}
+
+/**
+ * Checks if the brick-breaking sound is done playing yet, if so stop it
+ */
+void checkBreakBrickSound() {
+  if (millis() - _collisionStart > PLAY_TONE_DURATION_MS && _playingCollision) {
+    ledcWrite(PWM_CHANNEL, 0);
+    _playingCollision = false;
+  }
+}
+
+/**
+ * Plays the ball-losing sound and start the timer
+ */
 void playLoseBallSound() {
-  tone(TONE_OUTPUT_PIN, LOSE_BALL_TONE_FREQUENCY, PLAY_TONE_DURATION_MS);
-  // analogWrite(VIBRO_PIN, MAX_ANALOG_INPUT);
-  delay(500);
-  tone(TONE_OUTPUT_PIN, LOSE_BALL_TONE_FREQUENCY, PLAY_TONE_DURATION_MS);
-  // analogWrite(VIBRO_PIN, 0);
+  ledcWriteTone(PWM_CHANNEL, LOSE_BALL_TONE_FREQUENCY);
+  digitalWrite(VIBRO_PIN, HIGH);
+  _loseBallStart = millis();
+  _playingLoseBall = true;
+}
+
+/**
+ * Checks if the ball-losing sound is done playing yet, if so stop it
+ */
+void checkLoseBallSound() {
+  if (millis() - _loseBallStart > PLAY_TONE_DURATION_MS && _playingLoseBall) {
+    ledcWrite(PWM_CHANNEL, 0);
+    digitalWrite(VIBRO_PIN, LOW);
+    _playingLoseBall = false;
+  }
 }
 
 /*
@@ -408,7 +491,7 @@ void scoreboard() {
 }
 
 /**
- * Call this from setup() to initialize the OLED screen
+ * Initializes the OLED screen
  */
 void initializeOledAndShowLoadScreen(){
   // SSD1306_SWITCHCAPVCC = generate display voltage from 3.3V internally
@@ -458,6 +541,9 @@ void showLoadScreen() {
   _display.setTextSize(1);
 }
 
+/**
+ * Displays the status bar, which only shows the current score
+ */
 void drawStatusBar() {
   // Draw accumulated points
   _display.setTextSize(1);
