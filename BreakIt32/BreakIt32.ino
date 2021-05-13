@@ -1,10 +1,8 @@
-#include <pitches.h>
-#include <Tone32.h>
-
 #include <Wire.h>
 #include <SPI.h>
 #include <Preferences.h>
 #include <Shape.hpp>;
+#include <Tone32.hpp>
 
 #include <Adafruit_GFX.h>
 #include <Adafruit_SSD1306.h>
@@ -45,11 +43,11 @@ const char STR_CONT[] = "Press A to menu";
 const char STR_SERVE[] = "Press A to serve";
 
 // Button input
-const int LEFT_BTN_PIN = 4;
+const int LEFT_BTN_PIN = 15;
 
 // Joystick input
-const int JOYSTICK_UPDOWN_PIN = A0;
-const int JOYSTICK_LEFTRIGHT_PIN = A1;
+const int JOYSTICK_UPDOWN_PIN = A9;
+const int JOYSTICK_LEFTRIGHT_PIN = A10;
 const int MAX_ANALOG_VAL = 3800;
 const enum JoystickYDirection JOYSTICK_Y_DIR = RIGHT;
 
@@ -57,18 +55,15 @@ const enum JoystickYDirection JOYSTICK_Y_DIR = RIGHT;
 ParallaxJoystick _analogJoystick(JOYSTICK_UPDOWN_PIN, JOYSTICK_LEFTRIGHT_PIN, MAX_ANALOG_VAL, JOYSTICK_Y_DIR);
 
 // Buzzer output
-const int TONE_OUTPUT_PIN = 16;
+const int TONE_OUTPUT_PIN = 14;
 const int COLLISION_TONE_FREQUENCY = 300;
 const int LOSE_BALL_TONE_FREQUENCY = 100;
 const int PLAY_TONE_DURATION_MS = 200;
-unsigned long _collisionStart = 0;
-bool _playingCollision = false;
-unsigned long _loseBallStart = 0;
-bool _playingLoseBall = false;
 
 const int PWM_CHANNEL = 0;    // ESP32 has 16 channels which can generate 16 independent waveforms
 const int PWM_FREQ = 500;     // Recall that Arduino Uno is ~490 Hz. Official ESP32 example uses 5,000Hz
 const int PWM_RESOLUTION = 8; // We'll use same resolution as Uno (8 bits, 0-255) but ESP32 can go up to 16 bits 
+Tone32 _tone32(TONE_OUTPUT_PIN, PWM_CHANNEL);
 
 // Vibromotor output
 const int VIBRO_PIN = 32;
@@ -145,12 +140,12 @@ void setup() {
 
 void loop() {
   _display.clearDisplay();
-  checkSounds();
+  _tone32.update();
 
   // Read analog joystick to control player ball
   _analogJoystick.read();
   int leftRightVal = _analogJoystick.getLeftRightVal();
-
+  
   int btnVal = digitalRead(LEFT_BTN_PIN);
   if (_gameState == NEW_GAME) {
     int xMovementPixels = map(leftRightVal, 0, _analogJoystick.getMaxAnalogValue() + 1, -2, 2);
@@ -421,40 +416,14 @@ void checkSounds() {
  * Plays the brick-breaking sound and start the timer
  */
 void playBreakBrickSound() {
-  ledcWriteTone(PWM_CHANNEL, COLLISION_TONE_FREQUENCY);
-  _collisionStart = millis();
-  _playingCollision = true;
-}
-
-/**
- * Checks if the brick-breaking sound is done playing yet, if so stop it
- */
-void checkBreakBrickSound() {
-  if (millis() - _collisionStart > PLAY_TONE_DURATION_MS && _playingCollision) {
-    ledcWrite(PWM_CHANNEL, 0);
-    _playingCollision = false;
-  }
+  _tone32.playTone(COLLISION_TONE_FREQUENCY, PLAY_TONE_DURATION_MS);
 }
 
 /**
  * Plays the ball-losing sound and start the timer
  */
 void playLoseBallSound() {
-  ledcWriteTone(PWM_CHANNEL, LOSE_BALL_TONE_FREQUENCY);
-  digitalWrite(VIBRO_PIN, HIGH);
-  _loseBallStart = millis();
-  _playingLoseBall = true;
-}
-
-/**
- * Checks if the ball-losing sound is done playing yet, if so stop it
- */
-void checkLoseBallSound() {
-  if (millis() - _loseBallStart > PLAY_TONE_DURATION_MS && _playingLoseBall) {
-    ledcWrite(PWM_CHANNEL, 0);
-    digitalWrite(VIBRO_PIN, LOW);
-    _playingLoseBall = false;
-  }
+  _tone32.playTone(LOSE_BALL_TONE_FREQUENCY, PLAY_TONE_DURATION_MS);
 }
 
 /*
