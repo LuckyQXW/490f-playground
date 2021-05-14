@@ -13,8 +13,6 @@
 #define SCREEN_WIDTH 128 // OLED display width, in pixels
 #define SCREEN_HEIGHT 64 // OLED display height, in pixels
 
-#define EEPROM_SIZE 12
-
 // Declaration for an SSD1306 display connected to I2C (SDA, SCL pins)
 #define OLED_RESET     4 // Reset pin # (or -1 if sharing Arduino reset pin)
 Adafruit_SSD1306 _display(128, 64, &Wire, 4);
@@ -67,6 +65,8 @@ Tone32 _tone32(TONE_OUTPUT_PIN, PWM_CHANNEL);
 
 // Vibromotor output
 const int VIBRO_PIN = 32;
+const int VIBRATION_INTERVAL = 300;
+int _vibrationStart = 0;
 
 // Define game components
 // Paddle
@@ -79,6 +79,7 @@ int _paddleSpeed = 3;
 class Brick : public Rectangle {
   protected:
     bool _broken = false;
+    bool _hasPowerUp = false;
 
   public:
     Brick(int x, int y, int width, int height) : Rectangle(x, y, width, height)
@@ -92,11 +93,19 @@ class Brick : public Rectangle {
     bool setBroken(bool broken) {
       _broken = broken;
     }
+
+    void setHasPowerUp(bool hasPowerUp) {
+      _hasPowerUp = hasPowerUp;
+    }
+
+    bool hasPowerUp() {
+      return _hasPowerUp;
+    }
 };
 const int BRICK_WIDTH = 15;
 const int BRICK_HEIGHT = 4;
 const int BRICK_GAP = 1;
-const int NUM_ROWS = 1;
+const int NUM_ROWS = 3;
 const int NUM_BRICK_PER_ROW = 8;
 Brick **_bricks;
 
@@ -105,6 +114,109 @@ const int BALL_RADIUS = 2;
 Ball _ball(SCREEN_WIDTH / 2, SCREEN_HEIGHT / 2, 2);
 int _ballYSpeed = 1;
 bool _ballActive = false;
+
+// Power up
+/**
+ * @brief A PowerUp class that essentially is a rounded rectangle shape
+ *
+ */
+class PowerUp : public Shape {
+  protected:
+    int _radius = 0;
+    int _dropSpeed = 0;
+    bool _active = false;
+
+  public:
+    PowerUp(int x, int y, int width, int height)
+      : Shape(x, y, width, height)
+    {
+      // purposefully empty
+    }
+
+    void setRadius(int radius)  {
+      _radius = radius;
+    }
+
+    void setDropSpeed(int dropSpeed) {
+      _dropSpeed = dropSpeed;
+    }
+
+    void setActive(bool active) {
+      _active = active;
+    }
+
+    bool isActive() {
+      return _active;
+    }
+
+    void update() {
+      if (_active) {
+        _y += _dropSpeed;
+      }
+    }
+
+    /**
+     * @brief Draw the rounded rectangle
+     *
+     * @param display
+     */
+    void draw (Adafruit_SSD1306& display) override {
+      // Draw rounded rectangle takes in (xTop, yTop, width, height, radius)
+      // https://learn.adafruit.com/adafruit-gfx-graphics-library/graphics-primitives#rectangles-2002784-10
+      if (_drawFill) {
+        display.fillRoundRect(_x, _y, _width, _height, _radius, SSD1306_WHITE);
+      } else{
+        display.drawRoundRect(_x, _y, _width, _height, _radius, SSD1306_WHITE);
+      }
+
+      // We don't call the parent class draw() call because
+      // the bounding box is simple another rectangle
+      // Shape::draw(disp);
+    }
+
+    String getName() const override{
+      return "PowerUp";
+    }
+};
+PowerUp **_powerUps;
+bool _hasPowerUp = false;
+
+// FRS laser trigger
+const int INPUT_FSR_PIN = A5;
+const int GREEN_PIN = 21;
+const int YELLOW_PIN = 17;
+const int RED_PIN = 16;
+class Laser : public Rectangle {
+  protected:
+    int _shootSpeed = 0;
+    bool _active = false;
+
+  public:
+    Laser(int x, int y, int width, int height) : Rectangle(x, y, width, height)
+    {
+    }
+
+    void setShootSpeed(int shootSpeed) {
+      _shootSpeed = shootSpeed;
+    }
+
+    bool isActive() {
+      return _active;
+    }
+
+    void setActive(bool active) {
+      _active = active;
+    }
+
+    void update() {
+      if (_active) {
+        _y -= _shootSpeed;
+      }
+    }
+};
+Laser _laser(0, 0, 2, 6);
+const char STR_LASER_READY[] = "Laser Ready!";
+
 
 // Game state
 enum GameState {
@@ -126,6 +238,12 @@ void setup() {
   pinMode(LEFT_BTN_PIN, INPUT_PULLUP);
   pinMode(VIBRO_PIN, OUTPUT);
   pinMode(TONE_OUTPUT_PIN, OUTPUT);
+
+  pinMode(INPUT_FSR_PIN, INPUT);
+  pinMode(GREEN_PIN, OUTPUT);
+  pinMode(YELLOW_PIN, OUTPUT);
+  pinMode(RED_PIN, OUTPUT);
+
   ledcSetup(PWM_CHANNEL, PWM_FREQ, PWM_RESOLUTION);
   ledcAttachPin(TONE_OUTPUT_PIN, PWM_CHANNEL);
 
@@ -141,7 +259,7 @@ void setup() {
 void loop() {
   _display.clearDisplay();
   _tone32.update();
-
+  checkVibration();
   // Read analog joystick to control player ball
   _analogJoystick.read();
   int leftRightVal = _analogJoystick.getLeftRightVal();
@@ -231,14 +349,31 @@ void initializeGameEntities() {
   int brickY = 8;
   int brickX = 0;
   for (int i = 0; i < NUM_ROWS; i++) {
+    int powerUpIdx = random(NUM_BRICK_PER_ROW);
     for (int j = 0; j < NUM_BRICK_PER_ROW; j++) {
       _bricks[i * NUM_BRICK_PER_ROW + j] = new Brick(brickX, brickY, BRICK_WIDTH, BRICK_HEIGHT);
       _bricks[i * NUM_BRICK_PER_ROW + j]->setDrawFill(true);
       brickX += BRICK_GAP + BRICK_WIDTH;
+      // Assign powerups to one brick in each row
+      if (j == powerUpIdx) {
+        _bricks[i * NUM_BRICK_PER_ROW + j]->setHasPowerUp(true);
+      }
     }
     brickX = 0;
     brickY += BRICK_GAP + BRICK_HEIGHT;
   }
+
+  // powerup set up
+  _powerUps = new PowerUp*[NUM_ROWS];
+  for (int i = 0; i < NUM_ROWS; i++) {
+    _powerUps[i] = new PowerUp(0, SCREEN_HEIGHT, 6, 6);
+    _powerUps[i]->setDropSpeed(1);
+    _powerUps[i]->setRadius(1);
+    _powerUps[i]->setDrawFill(false);
+  }
+
+  // laser set up
+  _laser.setShootSpeed(5);
 }
 
 /**
@@ -248,6 +383,7 @@ void resetGameEntities() {
   resetBricks();
   resetPaddle();
   resetBall();
+  resetPowerUps();
   _score = 0;
 }
 
@@ -269,20 +405,42 @@ void resetBall() {
   _ball.setCenter(_paddle.getX() + _paddle.getWidth() / 2, _paddle.getY() - _ball.getRadius() - 1);
 }
 
+void resetPowerUps() {
+  for (int i = 0; i < NUM_ROWS; i++) {
+    _powerUps[i]->setActive(false);
+    _powerUps[i]->setLocation(0, SCREEN_HEIGHT);
+  }
+  _laser.setActive(false);
+  _laser.setLocation(0, SCREEN_HEIGHT);
+}
+
 /**
  * Runs the main game loop
  */
 void playLoop() {
   checkActivateBall();
   int pSpeed = updateAndGetPaddleSpeed();
+  if (_gameModeIdx == 1) {
+    checkLaser();
+    updatePowerUps();
+    updateLaser();
+  }
   updateBall(pSpeed);
   if (!updateBricks()) {
     _gameState = GAME_OVER;
+    // https://www.tutorialspoint.com/esp32_for_iot/esp32_for_iot_preferences.htm
     _preferences.begin("scoreRecord", false);
-    int oldHighscore = _preferences.getInt("basic", 0);
-    _highScore = max(oldHighscore, _score);
-    _preferences.putInt("basic", _highScore);
-    _preferences.end();
+    if (_gameModeIdx == 0) {
+      int oldHighscore = _preferences.getInt("basic", 0);
+      _highScore = max(oldHighscore, _score);
+      _preferences.putInt("basic", _highScore);
+      _preferences.end();
+    } else {
+      int oldHighscore = _preferences.getInt("advanced", 0);
+      _highScore = max(oldHighscore, _score);
+      _preferences.putInt("advanced", _highScore);
+      _preferences.end();
+    }
   }
 }
 
@@ -310,22 +468,16 @@ int updateAndGetPaddleSpeed() {
   if (_gameModeIdx == 0) {
     // Read joystick
     int leftRightVal = _analogJoystick.getLeftRightVal();
-    int xMovementPixels = map(leftRightVal, 0, _analogJoystick.getMaxAnalogValue() + 1, -10, 10);
+    int xMovementPixels = map(leftRightVal, 0, _analogJoystick.getMaxAnalogValue() + 1, -5, 5);
     // Decide the actual paddle speed and location based on the joystick value
-    if (xMovementPixels < 0) {
-      pSpeed = _paddleSpeed;
-    } else if (xMovementPixels > 0) {
-      pSpeed = -_paddleSpeed;
-    }
-    _paddle.setX(_paddle.getX() + pSpeed);
+    pSpeed = -xMovementPixels;
   } else {
     // Read accelerometer
     sensors_event_t event;
     lis.getEvent(&event);
-    pSpeed = event.acceleration.x;
-    _paddle.setX(_paddle.getX() + event.acceleration.x);
+    pSpeed = -event.acceleration.x;
   }
-  
+  _paddle.setX(_paddle.getX() + pSpeed);
   _paddle.forceInside(0, 0, _display.width(), _display.height());
   _paddle.draw(_display);
   return pSpeed;
@@ -353,6 +505,7 @@ void updateBall(int pSpeed) {
       resetBall();
       _score -= 5;
       playLoseBallSound();
+      startVibration();
     }
     // Ball hits the wall on left and right
     if (_ball.checkXBounce(0, SCREEN_WIDTH - 2 * _ball.getRadius())) {
@@ -361,6 +514,68 @@ void updateBall(int pSpeed) {
     _ball.update();
   }
   _ball.draw(_display);
+}
+
+void updatePowerUps() {
+  for (int i = 0; i < NUM_ROWS; i++) {
+    _powerUps[i]->update();
+    if (_powerUps[i]->isActive() && _powerUps[i]->overlaps(_paddle)) {
+      // successfully picked up powerup
+      _powerUps[i]->setActive(false);
+      _hasPowerUp = true;
+      
+    } else if (_powerUps[i]->getTop() > SCREEN_HEIGHT) {
+      // powerup goes off screen
+      _powerUps[i]->setActive(false);
+    }
+    if (_powerUps[i]->isActive()) {
+      _powerUps[i]->draw(_display);
+    }
+  }
+}
+
+void checkLaser() {
+  if(_hasPowerUp) {
+    int val = analogRead(INPUT_FSR_PIN);
+    int index = map(val, 2000, 4095, 0, 3);
+    // Laser charge sequence
+    if (index >= 1) {
+      digitalWrite(GREEN_PIN, HIGH);
+      _tone32.playTone(300);
+    }
+    if (index >= 2) {
+      digitalWrite(YELLOW_PIN, HIGH);
+      _tone32.playTone(400);
+    }
+    if (index >= 3) {
+      digitalWrite(RED_PIN, HIGH);
+      _tone32.playTone(500, 1000);
+      shootLaser();
+      digitalWrite(GREEN_PIN, LOW);
+      digitalWrite(YELLOW_PIN, LOW);
+      digitalWrite(RED_PIN, LOW);
+      _hasPowerUp = false;
+    }
+
+    if (index == 0) {
+      _tone32.playTone(0);
+      digitalWrite(GREEN_PIN, LOW);
+      digitalWrite(YELLOW_PIN, LOW);
+      digitalWrite(RED_PIN, LOW);
+    }
+  }
+}
+
+void shootLaser() {
+  _laser.setLocation((_paddle.getLeft() + _paddle.getRight()) / 2, (_paddle.getTop() + _paddle.getBottom()) / 2);
+  _laser.setActive(true);
+}
+
+void updateLaser() {
+  _laser.update();
+  if (_laser.isActive()) {
+    _laser.draw(_display);
+  }
 }
 
 /**
@@ -382,7 +597,23 @@ bool updateBricks() {
         // Ball hits the brick from the side
         _ball.reverseXSpeed();
       }
+      if (brick->hasPowerUp()) {
+        _powerUps[i / NUM_ROWS]->setLocation((brick->getLeft() + brick->getRight()) / 2, (brick->getTop() + brick->getBottom()) / 2);
+        _powerUps[i / NUM_ROWS]->setActive(true);
+      }
     }
+
+    if (brick->overlaps(_laser) && !brick->isBroken()) {
+      brick->setBroken(true);
+      _score += 1;
+      playBreakBrickSound();
+      _laser.setActive(false);
+      if (brick->hasPowerUp()) {
+        _powerUps[i / NUM_ROWS]->setLocation((brick->getLeft() + brick->getRight()) / 2, (brick->getTop() + brick->getBottom()) / 2);
+        _powerUps[i / NUM_ROWS]->setActive(true);
+      }
+    }
+
     if (!brick->isBroken()) {
       brick->draw(_display);
       hasUnbrokenBrick = true;
@@ -405,14 +636,6 @@ void showServeInstruction() {
 }
 
 /**
- * Stops the sounds if they have exceeded the specified duration
- */
-void checkSounds() {
-  checkBreakBrickSound();
-  checkLoseBallSound();
-}
-
-/**
  * Plays the brick-breaking sound and start the timer
  */
 void playBreakBrickSound() {
@@ -426,6 +649,16 @@ void playLoseBallSound() {
   _tone32.playTone(LOSE_BALL_TONE_FREQUENCY, PLAY_TONE_DURATION_MS);
 }
 
+void startVibration() {
+  _vibrationStart = millis();
+  digitalWrite(VIBRO_PIN, HIGH);
+}
+
+void checkVibration() {
+  if (millis() - _vibrationStart > VIBRATION_INTERVAL) {
+    digitalWrite(VIBRO_PIN, LOW);
+  }
+}
 /*
  * Displays the scoreboard
  */
@@ -514,8 +747,16 @@ void showLoadScreen() {
  * Displays the status bar, which only shows the current score
  */
 void drawStatusBar() {
+  int16_t x1, y1;
+  uint16_t w, h;
+  _display.setTextColor(WHITE, BLACK);
   // Draw accumulated points
   _display.setTextSize(1);
   _display.setCursor(0, 0); // draw points
   _display.print(_score);
+  if (_hasPowerUp) {
+    _display.getTextBounds(STR_LASER_READY, 0, 0, &x1, &y1, &w, &h);
+    _display.setCursor(_display.width() - w, 0); // draw points
+    _display.print(STR_LASER_READY);
+  }
 }
