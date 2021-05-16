@@ -1,7 +1,10 @@
 #include <Wire.h>
 #include <SPI.h>
 #include <Preferences.h>
-#include <Shape.hpp>;
+
+// From makability lab arduino library
+// https://github.com/makeabilitylab/arduino/tree/master/MakeabilityLab_Arduino_Library
+#include <Shape.hpp>
 #include <Tone32.hpp>
 
 #include <Adafruit_GFX.h>
@@ -12,6 +15,13 @@
 
 #define SCREEN_WIDTH 128 // OLED display width, in pixels
 #define SCREEN_HEIGHT 64 // OLED display height, in pixels
+
+// https://github.com/bhagman/Tone#musical-notes
+#define KEY_C 262  // 261.6256 Hz (middle C)
+#define KEY_D 294  // 293.6648 Hz
+#define KEY_E 330  // 329.6276 Hz
+#define KEY_F 350  // 349.2282 Hz
+#define KEY_G 392  // 391.9954 Hz
 
 // Declaration for an SSD1306 display connected to I2C (SDA, SCL pins)
 #define OLED_RESET     4 // Reset pin # (or -1 if sharing Arduino reset pin)
@@ -27,7 +37,7 @@ const int LOAD_SCREEN_SHOW_MS = 1000;
 
 // Menu screen
 const char STR_SELECT_GAME_MODE[] = "Choose game mode";
-const char STR_PRESS_TO_START[] = "Press A to start";
+const char STR_PRESS_TO_START[] = "Press Button to start";
 const char STR_BASIC[] = "Basic";
 const char STR_ADVANCED[] = "Advanced";
 
@@ -35,10 +45,10 @@ const char STR_ADVANCED[] = "Advanced";
 const char STR_SCOREBOARD[] = "Scoreboard";
 const char STR_YOURSCORE[] = "Your score: ";
 const char STR_HIGHSCORE[] = "High score: ";
-const char STR_CONT[] = "Press A to menu";
+const char STR_CONT[] = "Press Button to menu";
 
 // Game text
-const char STR_SERVE[] = "Press A to serve";
+const char STR_SERVE[] = "Press Button to serve";
 
 // Button input
 const int LEFT_BTN_PIN = 15;
@@ -62,6 +72,9 @@ const int PWM_CHANNEL = 0;    // ESP32 has 16 channels which can generate 16 ind
 const int PWM_FREQ = 500;     // Recall that Arduino Uno is ~490 Hz. Official ESP32 example uses 5,000Hz
 const int PWM_RESOLUTION = 8; // We'll use same resolution as Uno (8 bits, 0-255) but ESP32 can go up to 16 bits 
 Tone32 _tone32(TONE_OUTPUT_PIN, PWM_CHANNEL);
+const int WIN_DELAY = 100;
+unsigned long _lastWin = 0;
+bool _playedWinGameSound = true;
 
 // Vibromotor output
 const int VIBRO_PIN = 32;
@@ -105,7 +118,7 @@ class Brick : public Rectangle {
 const int BRICK_WIDTH = 15;
 const int BRICK_HEIGHT = 4;
 const int BRICK_GAP = 1;
-const int NUM_ROWS = 3;
+const int NUM_ROWS = 1;
 const int NUM_BRICK_PER_ROW = 8;
 Brick **_bricks;
 
@@ -217,14 +230,13 @@ class Laser : public Rectangle {
 Laser _laser(0, 0, 2, 6);
 const char STR_LASER_READY[] = "Laser Ready!";
 
-
 // Game state
 enum GameState {
   NEW_GAME,
   PLAYING,
   GAME_OVER,
 };
-Preferences _preferences;
+Preferences _preferences;  // For reading high score
 const int DELAY_LOOP_MS = 5;
 const int INPUT_DELAY_MS = 1000;
 GameState _gameState = NEW_GAME;
@@ -262,8 +274,8 @@ void loop() {
   checkVibration();
   // Read analog joystick to control player ball
   _analogJoystick.read();
+
   int leftRightVal = _analogJoystick.getLeftRightVal();
-  
   int btnVal = digitalRead(LEFT_BTN_PIN);
   if (_gameState == NEW_GAME) {
     int xMovementPixels = map(leftRightVal, 0, _analogJoystick.getMaxAnalogValue() + 1, -2, 2);
@@ -283,13 +295,18 @@ void loop() {
     drawStatusBar();
   } else if (_gameState == GAME_OVER) {
     scoreboard();
+    _lastWin = millis();
     if (btnVal == LOW) {
       _gameState = NEW_GAME;
       delay(INPUT_DELAY_MS);
     }
   }
-  
   _display.display();
+  // Special handling for the case where the disappearance of last brick was not drawn before playing the sound
+  if (_gameState == GAME_OVER && millis() - _lastWin > WIN_DELAY && !_playedWinGameSound) {
+    playWinGameSound();
+    _playedWinGameSound = true;
+  }
   if(DELAY_LOOP_MS > 0){
     delay(DELAY_LOOP_MS);
   }
@@ -299,7 +316,6 @@ void loop() {
  * Displays the select game mode menu
  */
 void showMenu() {
-  // Show select game mode screen
   _display.setTextSize(1);
   _display.setTextColor(WHITE, BLACK);
 
@@ -385,12 +401,19 @@ void resetGameEntities() {
   resetBall();
   resetPowerUps();
   _score = 0;
+  _playedWinGameSound = false;
 }
 
 void resetBricks() {
-  for (int i = 0; i < NUM_ROWS * NUM_BRICK_PER_ROW; i++) {
-    Brick *brick = _bricks[i];
-    brick->setBroken(false);
+  for (int i = 0; i < NUM_ROWS; i++) {
+    int powerUpIdx = random(NUM_BRICK_PER_ROW);
+    for (int j = 0; j < NUM_BRICK_PER_ROW; j++) {
+      _bricks[i * NUM_BRICK_PER_ROW + j]->setHasPowerUp(false);
+      _bricks[i * NUM_BRICK_PER_ROW + j]->setBroken(false);
+      if (j == powerUpIdx) {
+        _bricks[i * NUM_BRICK_PER_ROW + j]->setHasPowerUp(true);
+      }
+    }
   }
 }
 
@@ -420,7 +443,7 @@ void resetPowerUps() {
 void playLoop() {
   checkActivateBall();
   int pSpeed = updateAndGetPaddleSpeed();
-  if (_gameModeIdx == 1) {
+  if (_gameModeIdx == 1) {  // Check for advanced mode updates
     checkLaser();
     updatePowerUps();
     updateLaser();
@@ -434,13 +457,12 @@ void playLoop() {
       int oldHighscore = _preferences.getInt("basic", 0);
       _highScore = max(oldHighscore, _score);
       _preferences.putInt("basic", _highScore);
-      _preferences.end();
     } else {
       int oldHighscore = _preferences.getInt("advanced", 0);
       _highScore = max(oldHighscore, _score);
       _preferences.putInt("advanced", _highScore);
-      _preferences.end();
     }
+    _preferences.end();
   }
 }
 
@@ -453,7 +475,7 @@ void checkActivateBall() {
   int btnVal = digitalRead(LEFT_BTN_PIN);
   if (!_ballActive && btnVal == LOW) {
     _ballActive = true;
-    _ball.setSpeed(random(-5, 5), -_ballYSpeed);
+    _ball.setSpeed(random(-2, 2), -_ballYSpeed);
   }
 }
 
@@ -484,7 +506,7 @@ int updateAndGetPaddleSpeed() {
 }
 
 /**
- * Updates the ball movement
+ * Updates the ball movement incorporating paddle speed upon collision
  */
 void updateBall(int pSpeed) {
   if (!_ballActive) {
@@ -516,6 +538,9 @@ void updateBall(int pSpeed) {
   _ball.draw(_display);
 }
 
+/**
+ * Shows the powerup drop animation if any of them are active
+ */
 void updatePowerUps() {
   for (int i = 0; i < NUM_ROWS; i++) {
     _powerUps[i]->update();
@@ -523,7 +548,6 @@ void updatePowerUps() {
       // successfully picked up powerup
       _powerUps[i]->setActive(false);
       _hasPowerUp = true;
-      
     } else if (_powerUps[i]->getTop() > SCREEN_HEIGHT) {
       // powerup goes off screen
       _powerUps[i]->setActive(false);
@@ -534,10 +558,13 @@ void updatePowerUps() {
   }
 }
 
+/**
+ * Incorporates laser charge LED display and laser shooting based on FRS input
+ */
 void checkLaser() {
   if(_hasPowerUp) {
     int val = analogRead(INPUT_FSR_PIN);
-    int index = map(val, 2000, 4095, 0, 3);
+    int index = map(val, 2000, 4095, 0, 5);
     // Laser charge sequence
     if (index >= 1) {
       digitalWrite(GREEN_PIN, HIGH);
@@ -549,7 +576,10 @@ void checkLaser() {
     }
     if (index >= 3) {
       digitalWrite(RED_PIN, HIGH);
-      _tone32.playTone(500, 1000);
+      _tone32.playTone(500);
+      
+    }
+    if (index >= 4) {
       shootLaser();
       digitalWrite(GREEN_PIN, LOW);
       digitalWrite(YELLOW_PIN, LOW);
@@ -598,8 +628,9 @@ bool updateBricks() {
         _ball.reverseXSpeed();
       }
       if (brick->hasPowerUp()) {
-        _powerUps[i / NUM_ROWS]->setLocation((brick->getLeft() + brick->getRight()) / 2, (brick->getTop() + brick->getBottom()) / 2);
-        _powerUps[i / NUM_ROWS]->setActive(true);
+        // Activates the corresponding powerup
+        _powerUps[i / NUM_BRICK_PER_ROW]->setLocation((brick->getLeft() + brick->getRight()) / 2, (brick->getTop() + brick->getBottom()) / 2);
+        _powerUps[i / NUM_BRICK_PER_ROW]->setActive(true);
       }
     }
 
@@ -609,8 +640,8 @@ bool updateBricks() {
       playBreakBrickSound();
       _laser.setActive(false);
       if (brick->hasPowerUp()) {
-        _powerUps[i / NUM_ROWS]->setLocation((brick->getLeft() + brick->getRight()) / 2, (brick->getTop() + brick->getBottom()) / 2);
-        _powerUps[i / NUM_ROWS]->setActive(true);
+        _powerUps[i / NUM_BRICK_PER_ROW]->setLocation((brick->getLeft() + brick->getRight()) / 2, (brick->getTop() + brick->getBottom()) / 2);
+        _powerUps[i / NUM_BRICK_PER_ROW]->setActive(true);
       }
     }
 
@@ -649,16 +680,40 @@ void playLoseBallSound() {
   _tone32.playTone(LOSE_BALL_TONE_FREQUENCY, PLAY_TONE_DURATION_MS);
 }
 
+/**
+ * Plays the sound effect when the player clears all bricks
+ */
+void playWinGameSound() {
+  _tone32.playTone(KEY_C, PLAY_TONE_DURATION_MS);
+  delay(PLAY_TONE_DURATION_MS);
+  _tone32.playTone(KEY_E, PLAY_TONE_DURATION_MS);
+  delay(PLAY_TONE_DURATION_MS);
+  _tone32.playTone(KEY_G, PLAY_TONE_DURATION_MS);
+  delay(PLAY_TONE_DURATION_MS);
+  _tone32.playTone(KEY_E, PLAY_TONE_DURATION_MS);
+  delay(PLAY_TONE_DURATION_MS);
+  _tone32.playTone(KEY_G, PLAY_TONE_DURATION_MS);
+  delay(PLAY_TONE_DURATION_MS);
+  _tone32.playTone(0);
+}
+
+/**
+ * Activate the lose ball vibration
+ */
 void startVibration() {
   _vibrationStart = millis();
   digitalWrite(VIBRO_PIN, HIGH);
 }
 
+/**
+ * Check and see if the vibration has exceeded the predefined interval, if so turn it off
+ */
 void checkVibration() {
   if (millis() - _vibrationStart > VIBRATION_INTERVAL) {
     digitalWrite(VIBRO_PIN, LOW);
   }
 }
+
 /*
  * Displays the scoreboard
  */
@@ -756,7 +811,7 @@ void drawStatusBar() {
   _display.print(_score);
   if (_hasPowerUp) {
     _display.getTextBounds(STR_LASER_READY, 0, 0, &x1, &y1, &w, &h);
-    _display.setCursor(_display.width() - w, 0); // draw points
+    _display.setCursor(_display.width() - w, 0); // draw laser ready text
     _display.print(STR_LASER_READY);
   }
 }
