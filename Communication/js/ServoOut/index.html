@@ -1,0 +1,22 @@
+<!DOCTYPE html>
+<html>
+    <head>
+        <title>Web Serial Demo</title>
+        <script src="https://cdn.jsdelivr.net/gh/makeabilitylab/p5js/_libraries/serial.js"></script>
+        <script src="script.js"></script>
+        <link href="style.css" rel="stylesheet" />
+    </head>
+
+    <body>
+        <div id="main-content">
+            <h1>Servo Control Demo</h1>
+            <p>This demo uses a slider to set an angle between 0-180 for the connected servo.</p>
+            <button id="connect-button">Connect via Serial Port</button>
+            <div id="slider-container" class="hidden">
+                <h1>Servo angle: <span id="slider-value">0</span></h1>
+                <span>0</span><input id="slider" type="range" min="0" max="180" value="0"/><span>180</span>
+                <p id="move-indicator" class="hidden">Moving to target angle 🧐</p>
+            </div>
+        </div>
+    </body>
+</html>
