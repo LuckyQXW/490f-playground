@@ -7,7 +7,7 @@ let shapeClassifier;
 
 function preload() {
   console.log("loading data");
-  for (let i = 0; i < 400; i++) {
+  for (let i = 0; i < 500; i++) {
     let index = nf(i + 1, 4, 0);
     circles[i] = loadImage(`data/circle${index}.png`);
     squares[i] = loadImage(`data/square${index}.png`);
@@ -19,6 +19,7 @@ function setup() {
   canvas = createCanvas(64, 64);
   background(255);
   image(circles[0], 0, 0, width, height);
+
   let options = {
     inputs: [64, 64, 4],
     task: "imageClassification",
