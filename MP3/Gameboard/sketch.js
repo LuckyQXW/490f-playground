@@ -1,3 +1,4 @@
+let canvas;
 let cannons = [];
 let activeCannon = 0;
 const numLanes = 5;
@@ -16,22 +17,60 @@ let stage = 1;
 // Used to keep track of time
 let lastFrameCount = 0;
 // Shapes are spawned every 100 frames
-let shapeSpawnInterval = 100;
+let shapeSpawnInterval = 300;
+
+let shapeClassifier;
+let resultDiv;
+let clearButton;
+let modelReady = false;
+let inputImage;
 
 function preload() {
   
 }
 
 function setup() {
-  createCanvas(500, 400);
+  canvas = createCanvas(1000, 400);
   // Set up cannons
-  let x = 30;
-  for (let i = 0; i < numLanes; i++) {
-    cannons.push(new Cannon(x, 340));
-    x += 100;
+  background(100);
+  push();
+    translate(500, 0);
+    let x = 30;
+    for (let i = 0; i < numLanes; i++) {
+      cannons.push(new Cannon(x, 340));
+      x += 100;
+    }
+    resetGame();
+  pop();
+
+  clearDrawingBoard();
+
+  // set up ML model
+  const options = {
+    inputs: [64, 64, 4],
+    task: 'imageClassification'
   }
-  resetGame();
+  shapeClassifier = ml5.neuralNetwork(options);
+
+  const modelDetails = {
+    model: 'model/model.json',
+    metadata: 'model/model_meta.json',
+    weights: 'model/model.weights.bin'
+  };
+  inputImage = createGraphics(32, 32);
+  resultDiv = createDiv("loading model...");
+  shapeClassifier.load(modelDetails, modelLoaded);
+  clearButton = createButton("Clear");
+  clearButton.mousePressed(function() {
+    clearDrawingBoard();
+  });
   noLoop();
+}
+
+function clearDrawingBoard() {
+  strokeWeight(0);
+  fill(255);
+  rect(0, 0, 400, 400);
 }
 
 function resetGame() {
@@ -44,16 +83,20 @@ function resetGame() {
     cannons[i].reset();
   }
   isGameOver = false;
+  clearDrawingBoard();
   loop();
 }
 
 function keyPressed() {
-  if (key == ' ') {
+  if (key == ' ' && modelReady) {
     if (isGameOver) {
       resetGame();
     } else if (!hasGameBegun) {
       hasGameBegun = true;
       loop();
+    } else {
+      classifyShape();
+      clearDrawingBoard();
     }
   }
   if (keyIsDown(RIGHT_ARROW)) {
@@ -63,24 +106,60 @@ function keyPressed() {
     if (activeCannon < 0) {
       activeCannon = numLanes - 1;
     }
-  } 
-  // TODO: replace by the canvas input
-  else if (key === '1') {
-    cannons[activeCannon].addAmmo(1);
-  } else if (key === '2') {
-    cannons[activeCannon].addAmmo(2);
-  } else if (key === '0') {
-    cannons[activeCannon].addAmmo(0);
   }
 }
 
 function draw() {
-  background(220);
-  checkSpawn();
-  updateAmmos();
-  updateSadShapes();
-  updateCannons();
-  drawScore();
+  push();
+    translate(500, 0);
+    fill(220);
+    rect(0, 0, 500, 400);
+    checkSpawn();
+    updateAmmos();
+    updateSadShapes();
+    updateCannons();
+    drawScore();
+  pop();
+  strokeWeight(15);
+  stroke(0);
+  if (mouseIsPressed && onDrawingBoard()) {
+    line(pmouseX, pmouseY, mouseX, mouseY);
+  }
+  noStroke();
+}
+
+function modelLoaded() {
+  resultDiv.html("model loaded!");
+  modelReady = true;
+}
+
+function classifyShape() {
+  inputImage.copy(canvas, 0, 0, 400, 400, 0, 0, 32, 32);
+  shapeClassifier.classify({image: inputImage}, gotResults);
+}
+
+function gotResults(err, results) {
+  if (err) {
+    console.log(err);
+    return;
+  }
+  resultDiv.html(`${results[0].label}, ${results[0].confidence}`)
+  switch(results[0].label) {
+    case 'circle':
+      cannons[activeCannon].addAmmo(0);
+      break;
+    case 'square':
+      cannons[activeCannon].addAmmo(1);
+      break;
+    case 'triangle':
+      cannons[activeCannon].addAmmo(2);
+      break;
+  }
+}
+
+function onDrawingBoard() {
+  return (pmouseX > 0 && pmouseX < 400 && mouseX > 0 && mouseX < 400 &&
+         pmouseY > 0 && pmouseY < 400 && mouseY > 0 && mouseY < 400);
 }
 
 function updateCannons() {
@@ -175,7 +254,7 @@ function drawScore() {
   fill(0);
   textAlign(RIGHT);
   textSize(15);
-  text('Lives: ' + lives, width - 10, 20);
+  text('Lives: ' + lives, width / 2 - 10, 20);
   if (isGameOver) {
     // dark overlay
     fill(0, 0, 0, 100);
@@ -185,15 +264,15 @@ function drawScore() {
     textAlign(CENTER);
     textSize(35);
     fill(255);
-    text('GAME OVER!', width / 2, height / 3);
+    text('GAME OVER!', width / 4, height / 3);
     
     textSize(12);
     let yText = height / 2;
     if(highScore > lastHighScore && highScore > 0) {
-      text('New Hi-Score of ' + highScore + '!', width / 2, yText);
+      text('New Hi-Score of ' + highScore + '!', width / 4, yText);
       yText += 30;
     }
-    text('Press SPACE BAR to play again.', width / 2, yText);
+    text('Press SPACE BAR to play again.', width / 4, yText);
   } else if (!hasGameBegun){
     // if we're here, then the game has yet to begin for the first time
     // dark overlay
@@ -204,6 +283,6 @@ function drawScore() {
     textAlign(CENTER);
     textSize(15);
     fill(255);
-    text('Press SPACE BAR to play!', width / 2, height / 3);
+    text('Press SPACE BAR to play!', width / 4, height / 3);
   }
 }
