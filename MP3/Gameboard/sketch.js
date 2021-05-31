@@ -3,6 +3,7 @@ let cannons = [];
 let activeCannon = 0;
 const numLanes = 5;
 let sadShapes = [];
+let shapeQueue = {0: [], 1: [], 2: [], 3: [], 4:[]};
 let ammos = [];
 // Used to keep track of which lane has shapes incoming
 let shapeCounts = {0:0,1:0,2:0,3:0,4:0}
@@ -16,7 +17,6 @@ let lastHighScore = -1;
 let stage = 1;
 // Used to keep track of time
 let lastFrameCount = 0;
-// Shapes are spawned every 100 frames
 let shapeSpawnInterval = 300;
 
 let shapeClassifier;
@@ -24,13 +24,41 @@ let resultDiv;
 let clearButton;
 let modelReady = false;
 let inputImage;
+let hasStroke = false;
+
+let serial; // the Serial object
+let serialOptions = { baudRate: 115200 };
+let receivedData;
 
 function preload() {
-  
+  // set up ML model
+  const options = {
+    inputs: [64, 64, 4],
+    task: 'imageClassification'
+  }
+  shapeClassifier = ml5.neuralNetwork(options);
+
+  const modelDetails = {
+    model: 'model/model.json',
+    metadata: 'model/model_meta.json',
+    weights: 'model/model.weights.bin'
+  };
+  shapeClassifier.load(modelDetails, modelLoaded);
 }
 
 function setup() {
   canvas = createCanvas(1000, 400);
+
+  // Setup Web Serial using serial.js
+  serial = new Serial();
+  serial.on(SerialEvents.CONNECTION_OPENED, onSerialConnectionOpened);
+  serial.on(SerialEvents.CONNECTION_CLOSED, onSerialConnectionClosed);
+  serial.on(SerialEvents.DATA_RECEIVED, onSerialDataReceived);
+  serial.on(SerialEvents.ERROR_OCCURRED, onSerialErrorOccurred);
+
+  // If we have previously approved ports, attempt to connect with them
+  serial.autoConnectAndOpenPreviouslyApprovedPort(serialOptions);
+  receivedData = createDiv("Click anywhere to connect to serial port");
   // Set up cannons
   background(100);
   push();
@@ -45,21 +73,8 @@ function setup() {
 
   clearDrawingBoard();
 
-  // set up ML model
-  const options = {
-    inputs: [64, 64, 4],
-    task: 'imageClassification'
-  }
-  shapeClassifier = ml5.neuralNetwork(options);
-
-  const modelDetails = {
-    model: 'model/model.json',
-    metadata: 'model/model_meta.json',
-    weights: 'model/model.weights.bin'
-  };
   inputImage = createGraphics(32, 32);
   resultDiv = createDiv("loading model...");
-  shapeClassifier.load(modelDetails, modelLoaded);
   clearButton = createButton("Clear");
   clearButton.mousePressed(function() {
     clearDrawingBoard();
@@ -67,13 +82,53 @@ function setup() {
   noLoop();
 }
 
+function onSerialErrorOccurred(eventSender, error) {
+  receivedData.html(error);
+}
+
+function onSerialConnectionOpened(eventSender) {
+  receivedData.html("Serial connection opened successfully");
+  serialWriteTextData("-1,-1,-1,-1,-1");
+}
+
+function onSerialConnectionClosed(eventSender) {
+  receivedData.html("onSerialConnectionClosed");
+}
+
+function onSerialDataReceived(eventSender, newData) {
+  receivedData.html("onSerialDataReceived: " + newData);
+  let direction = parseInt(newData);
+  activeCannon += direction;
+  if (activeCannon < 0) {
+    activeCannon = 0;
+  } else if (activeCannon > numLanes) {
+    activeCannon = numLanes - 1;
+  }
+}
+
+// Send text data over serial
+function serialWriteTextData(textData) {
+  if (serial.isOpen()) {
+    console.log("Writing to serial: ", textData);
+    serial.writeLine(textData);
+  }
+}
+
+function mouseClicked() {
+  if (!serial.isOpen()) {
+    serial.connectAndOpen(null, serialOptions);
+  }
+}
+
 function clearDrawingBoard() {
   strokeWeight(0);
   fill(255);
   rect(0, 0, 400, 400);
+  hasStroke = false;
 }
 
 function resetGame() {
+  serialWriteTextData("-1,-1,-1,-1,-1");
   score = 0;
   lives = 3;
   shapeCounts = {0:0,1:0,2:0,3:0,4:0};
@@ -82,6 +137,7 @@ function resetGame() {
   for (let i = 0; i < numLanes; i++) {
     cannons[i].reset();
   }
+  enqueueNextWave();
   isGameOver = false;
   clearDrawingBoard();
   loop();
@@ -94,7 +150,7 @@ function keyPressed() {
     } else if (!hasGameBegun) {
       hasGameBegun = true;
       loop();
-    } else {
+    } else if (hasStroke) {
       classifyShape();
       clearDrawingBoard();
     }
@@ -114,16 +170,18 @@ function draw() {
     translate(500, 0);
     fill(220);
     rect(0, 0, 500, 400);
+    checkStage();
     checkSpawn();
     updateAmmos();
     updateSadShapes();
     updateCannons();
     drawScore();
   pop();
-  strokeWeight(15);
+  strokeWeight(20);
   stroke(0);
   if (mouseIsPressed && onDrawingBoard()) {
     line(pmouseX, pmouseY, mouseX, mouseY);
+    hasStroke = true;
   }
   noStroke();
 }
@@ -207,8 +265,10 @@ function updateSadShapes() {
       shapeCounts[sadShapes[i].getLane()] -= 1;
       // Once any shape reaches a cannon, lives -1
       lives--;
+      serialWriteTextData("b");
       if (lives == 0) {
         isGameOver = true;
+        serialWriteTextData("-1,-1,-1,-1,-1");
         lastHighScore = highScore;
         if(highScore < score){
           highScore = score;
@@ -222,27 +282,51 @@ function updateSadShapes() {
 
 function checkSpawn() {
   if ((frameCount - lastFrameCount) >= shapeSpawnInterval) {
-    spawnSadShape();
+    dequeSadShape();
     lastFrameCount = frameCount;
   }
 }
 
-function spawnSadShape() {
+function checkStage() {
+  if (score >= stage * 500) {
+    stage += 1;
+    shapeSpawnInterval -= 50;
+  }
+}
+
+function spawnSadShape(lane) {
   // Randomly pick a lane to spawn a random shape
-  let lane = Math.floor(random(numLanes));
   let type = Math.floor(random(3));
-  shapeCounts[lane] += 1;
   let x = lane * 100 + 40;
-  switch(type) {
-    case 0:
-      sadShapes.push(new SadShape(x, 0, 0, lane));
-      break;
-    case 1:
-      sadShapes.push(new SadShape(x, 0, 1, lane));
-      break;
-    case 2:
-      sadShapes.push(new SadShape(x, 0, 2, lane));
-      break;
+  return new SadShape(x, -20, type, lane);
+}
+
+function dequeSadShape() {
+  let lane = Math.floor(random(numLanes));
+  let nextShape = shapeQueue[lane].shift();
+  nextShape.setActive(true);
+  sadShapes.push(nextShape);
+  shapeCounts[lane] += 1;
+  enqueueNextWave();
+  sendShapeSequence();
+}
+
+function sendShapeSequence() {
+  let sequence = '';
+  for (let i = 0; i < numLanes; i++) {
+    sequence += shapeQueue[i][0].getShape();
+    if (i != numLanes - 1) {
+      sequence += ',';
+    }
+  }
+  serialWriteTextData(sequence);
+}
+
+function enqueueNextWave() {
+  for (let i = 0; i < numLanes; i++) {
+    if (shapeQueue[i].length == 0) {
+      shapeQueue[i].push(spawnSadShape(i));
+    }
   }
 }
 
@@ -251,6 +335,8 @@ function drawScore() {
   textAlign(LEFT);
   textSize(15);
   text('Score: ' + score, 10, 20);
+  let stageStr = 'Stage:' + stage;
+  text(stageStr, width / 2 - textWidth(stageStr) - 100, 20);
   fill(0);
   textAlign(RIGHT);
   textSize(15);

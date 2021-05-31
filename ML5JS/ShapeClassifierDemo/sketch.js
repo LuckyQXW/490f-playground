@@ -59,7 +59,7 @@ function gotResults(err, results) {
 
 function draw() {
   if (mouseIsPressed) {
-    strokeWeight(8);
+    strokeWeight(20);
     line(mouseX, mouseY, pmouseX, pmouseY);
   }
 }

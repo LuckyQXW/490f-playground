@@ -5,6 +5,9 @@ void setup() {
 
 
 void draw() {
+  background(255);
+  saveFrame("data/empty####.png");
+  /*
   for (int i = 0; i < 3; i++) {
     background(255);
     pushMatrix();
@@ -45,7 +48,8 @@ void draw() {
     }
     popMatrix();
   }
-  if (frameCount == 500) {
+  */
+  if (frameCount == 5) {
     exit();
   }
 }

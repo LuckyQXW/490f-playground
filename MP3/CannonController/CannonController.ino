@@ -60,9 +60,6 @@ void loop() {
       // enemy breach signal
       playBreachVibration();
     }
-    Serial.print("Arduino Received: '");
-    Serial.print(rcvdSerialData);
-    Serial.println("'");
   }
   _display.display();
 
