@@ -29,6 +29,8 @@ class Ammo extends Shape {
     push();
       translate(this.x, this.y);
       fill(255);
+      stroke(0);
+      strokeWeight(2);
       switch(this.shape) {
         case 0:
           circle(SHAPE_SIZE / 2, SHAPE_SIZE / 2, SHAPE_SIZE);

@@ -15,9 +15,9 @@ let score = 0;
 let highScore = -1;
 let lastHighScore = -1;
 let stage = 1;
+let stagesSpawnIntervals = [300, 280, 250, 220, 200, 180, 160, 140, 120, 100]
 // Used to keep track of time
 let lastFrameCount = 0;
-let shapeSpawnInterval = 300;
 
 let shapeClassifier;
 let resultDiv;
@@ -30,7 +30,10 @@ let serial; // the Serial object
 let serialOptions = { baudRate: 115200 };
 let receivedData;
 
+let bgMusic;
+
 function preload() {
+  bgMusic = createAudio('assets/brave_world.wav');
   // set up ML model
   const options = {
     inputs: [64, 64, 4],
@@ -43,12 +46,12 @@ function preload() {
     metadata: 'model/model_meta.json',
     weights: 'model/model.weights.bin'
   };
+  resultDiv = createDiv("loading model...");
   shapeClassifier.load(modelDetails, modelLoaded);
 }
 
 function setup() {
   canvas = createCanvas(1000, 400);
-
   // Setup Web Serial using serial.js
   serial = new Serial();
   serial.on(SerialEvents.CONNECTION_OPENED, onSerialConnectionOpened);
@@ -74,7 +77,6 @@ function setup() {
   clearDrawingBoard();
 
   inputImage = createGraphics(32, 32);
-  resultDiv = createDiv("loading model...");
   clearButton = createButton("Clear");
   clearButton.mousePressed(function() {
     clearDrawingBoard();
@@ -100,9 +102,9 @@ function onSerialDataReceived(eventSender, newData) {
   let direction = parseInt(newData);
   activeCannon += direction;
   if (activeCannon < 0) {
-    activeCannon = 0;
-  } else if (activeCannon > numLanes) {
     activeCannon = numLanes - 1;
+  } else if (activeCannon >= numLanes) {
+    activeCannon = 0;
   }
 }
 
@@ -124,6 +126,18 @@ function clearDrawingBoard() {
   strokeWeight(0);
   fill(255);
   rect(0, 0, 400, 400);
+  push();
+    canvas.drawingContext.setLineDash([2, 10]);
+    noFill();
+    stroke(100);
+    strokeWeight(2);
+    translate(200, 200);
+    circle(0, 0, 200);
+    triangle(0, -100, -100, 100, 100, 100);
+    rect(-100, -100, 200, 200);
+    canvas.drawingContext.setLineDash([]);
+    fill(255);
+  pop();
   hasStroke = false;
 }
 
@@ -134,6 +148,7 @@ function resetGame() {
   shapeCounts = {0:0,1:0,2:0,3:0,4:0};
   sadShapes = [];
   ammos = [];
+  stage = 1;
   for (let i = 0; i < numLanes; i++) {
     cannons[i].reset();
   }
@@ -147,8 +162,10 @@ function keyPressed() {
   if (key == ' ' && modelReady) {
     if (isGameOver) {
       resetGame();
+      bgMusic.loop();
     } else if (!hasGameBegun) {
       hasGameBegun = true;
+      bgMusic.loop();
       loop();
     } else if (hasStroke) {
       classifyShape();
@@ -202,17 +219,25 @@ function gotResults(err, results) {
     return;
   }
   resultDiv.html(`${results[0].label}, ${results[0].confidence}`)
-  switch(results[0].label) {
-    case 'circle':
-      cannons[activeCannon].addAmmo(0);
-      break;
-    case 'square':
-      cannons[activeCannon].addAmmo(1);
-      break;
-    case 'triangle':
-      cannons[activeCannon].addAmmo(2);
-      break;
-  }
+  push();
+    noFill();
+    strokeWeight(5);
+    switch(results[0].label) {
+      case 'circle':
+        cannons[activeCannon].addAmmo(0);
+        stroke('red')
+        break;
+      case 'square':
+        cannons[activeCannon].addAmmo(1);
+        stroke('yellow');
+        break;
+      case 'triangle':
+        cannons[activeCannon].addAmmo(2);
+        stroke('green');
+        break;
+    }
+    rect(0, 0, 400, 400);
+  pop();
 }
 
 function onDrawingBoard() {
@@ -269,6 +294,7 @@ function updateSadShapes() {
       if (lives == 0) {
         isGameOver = true;
         serialWriteTextData("-1,-1,-1,-1,-1");
+        bgMusic.stop();
         lastHighScore = highScore;
         if(highScore < score){
           highScore = score;
@@ -281,16 +307,15 @@ function updateSadShapes() {
 }
 
 function checkSpawn() {
-  if ((frameCount - lastFrameCount) >= shapeSpawnInterval) {
+  if ((frameCount - lastFrameCount) >= stagesSpawnIntervals[stage - 1]) {
     dequeSadShape();
     lastFrameCount = frameCount;
   }
 }
 
 function checkStage() {
-  if (score >= stage * 500) {
+  if (score >= stage * 1000 && stage <= 10) {
     stage += 1;
-    shapeSpawnInterval -= 50;
   }
 }
 
@@ -335,7 +360,7 @@ function drawScore() {
   textAlign(LEFT);
   textSize(15);
   text('Score: ' + score, 10, 20);
-  let stageStr = 'Stage:' + stage;
+  let stageStr = 'Stage: ' + stage;
   text(stageStr, width / 2 - textWidth(stageStr) - 100, 20);
   fill(0);
   textAlign(RIGHT);
@@ -367,8 +392,14 @@ function drawScore() {
 
     // draw game over text
     textAlign(CENTER);
-    textSize(15);
+    textSize(20);
     fill(255);
-    text('Press SPACE BAR to play!', width / 4, height / 3);
+    let yText = height / 3;
+    text('Press SPACE BAR to play!', width / 4, yText);
+    yText += 50;
+    textSize(15);
+    text('Player 1 draw ammo shapes and press space to load cannons', width / 4, yText);
+    yText += 30;
+    text('Player 2 choose the cannon and watch out for next wave', width / 4, yText);
   }
 }
