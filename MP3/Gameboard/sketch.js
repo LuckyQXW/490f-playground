@@ -46,7 +46,7 @@ function preload() {
     metadata: 'model/model_meta.json',
     weights: 'model/model.weights.bin'
   };
-  resultDiv = createDiv("loading model...");
+  // resultDiv = createDiv("loading model...");
   shapeClassifier.load(modelDetails, modelLoaded);
 }
 
@@ -127,8 +127,11 @@ function clearDrawingBoard() {
   fill(255);
   rect(0, 0, 400, 400);
   push();
-    canvas.drawingContext.setLineDash([2, 10]);
     noFill();
+    stroke(0);
+    strokeWeight(5);
+    rect(0, 0, 400, 400);
+    canvas.drawingContext.setLineDash([2, 10]);
     stroke(100);
     strokeWeight(2);
     translate(200, 200);
@@ -136,8 +139,8 @@ function clearDrawingBoard() {
     triangle(0, -100, -100, 100, 100, 100);
     rect(-100, -100, 200, 200);
     canvas.drawingContext.setLineDash([]);
-    fill(255);
   pop();
+  
   hasStroke = false;
 }
 
@@ -204,7 +207,7 @@ function draw() {
 }
 
 function modelLoaded() {
-  resultDiv.html("model loaded!");
+  // resultDiv.html("model loaded!");
   modelReady = true;
 }
 
@@ -218,7 +221,7 @@ function gotResults(err, results) {
     console.log(err);
     return;
   }
-  resultDiv.html(`${results[0].label}, ${results[0].confidence}`)
+  // resultDiv.html(`${results[0].label}, ${results[0].confidence}`)
   push();
     noFill();
     strokeWeight(5);
