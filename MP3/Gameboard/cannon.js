@@ -8,6 +8,8 @@ class Cannon extends Shape {
     this.active = false;
     this.shootInterval = 20;
     this.lastShootTime = 0;
+    this.shootEffect = createAudio('assets/shoot.wav');
+    this.shootEffect.volume(0.5);
   }
   
   update() {
@@ -15,6 +17,7 @@ class Cannon extends Shape {
   
   shoot(gameAmmos) {
     if ((frameCount - this.lastShootTime) >= this.shootInterval && this.ammos.length > 0) {
+      this.shootEffect.play();
       let shape = this.ammos.pop();
       let ammo = new Ammo(this.x + 10, this.y, shape);
       gameAmmos.push(ammo);

@@ -2,7 +2,7 @@ let canvas;
 let cannons = [];
 let activeCannon = 0;
 const numLanes = 5;
-let sadShapes = [];
+let enemies = [];
 let shapeQueue = {0: [], 1: [], 2: [], 3: [], 4:[]};
 let ammos = [];
 // Used to keep track of which lane has shapes incoming
@@ -15,7 +15,7 @@ let score = 0;
 let highScore = -1;
 let lastHighScore = -1;
 let stage = 1;
-let stagesSpawnIntervals = [300, 280, 250, 220, 200, 180, 160, 140, 120, 100]
+let stagesSpawnIntervals = [300, 280, 250, 220, 200, 180, 160, 140, 120, 100, 80, 60, 50, 40]
 // Used to keep track of time
 let lastFrameCount = 0;
 
@@ -32,9 +32,14 @@ let receivedData;
 let connectButton;
 
 let bgMusic;
+let hitEffect;
+
 
 function preload() {
   bgMusic = createAudio('assets/brave_world.wav');
+  bgMusic.volume(0.5);
+  hitEffect = createAudio('assets/hit.wav');
+  hitEffect.volume(0.5);
   // set up ML model
   const options = {
     inputs: [64, 64, 4],
@@ -159,7 +164,7 @@ function resetGame() {
   score = 0;
   lives = 3;
   shapeCounts = {0:0,1:0,2:0,3:0,4:0};
-  sadShapes = [];
+  enemies = [];
   ammos = [];
   stage = 1;
   for (let i = 0; i < numLanes; i++) {
@@ -205,7 +210,7 @@ function draw() {
     checkStage();
     checkSpawn();
     updateAmmos();
-    updateSadShapes();
+    updateEnemies();
     updateCannons();
     drawScore();
   pop();
@@ -276,12 +281,13 @@ function updateAmmos() {
   let newAmmos = []
   for (let i = 0; i < ammos.length; i++) {
     ammos[i].update();
-    for (let j = 0; j < sadShapes.length; j++) {
+    for (let j = 0; j < enemies.length; j++) {
       // check if the ammo hits any shape
-      if (ammos[i].overlaps(sadShapes[j]) && ammos[i].getShape() == sadShapes[j].getShape()) {
+      if (ammos[i].overlaps(enemies[j]) && ammos[i].getShape() == enemies[j].getShape()) {
         ammos[i].setActive(false);
-        sadShapes[j].setActive(false);
-        shapeCounts[sadShapes[j].getLane()] -= 1;
+        enemies[j].setActive(false);
+        hitEffect.play();
+        shapeCounts[enemies[j].getLane()] -= 1;
         score += 100;
       }
     }
@@ -294,15 +300,15 @@ function updateAmmos() {
   ammos = newAmmos;
 }
 
-function updateSadShapes() {
-  let newSadShapes = []
-  for (let i = 0; i < sadShapes.length; i++) {
-    sadShapes[i].update();
-    if (sadShapes[i].getBottom() < height - 60 && sadShapes[i].isActive()) {
-      newSadShapes.push(sadShapes[i]);
-      sadShapes[i].draw();
-    } else if (sadShapes[i].getBottom() >= height - 60) {
-      shapeCounts[sadShapes[i].getLane()] -= 1;
+function updateEnemies() {
+  let newEnemies = []
+  for (let i = 0; i < enemies.length; i++) {
+    enemies[i].update();
+    if (enemies[i].getBottom() < height - 60 && enemies[i].isActive()) {
+      newEnemies.push(enemies[i]);
+      enemies[i].draw();
+    } else if (enemies[i].getBottom() >= height - 60) {
+      shapeCounts[enemies[i].getLane()] -= 1;
       // Once any shape reaches a cannon, lives -1
       lives--;
       serialWriteTextData("b");
@@ -318,34 +324,34 @@ function updateSadShapes() {
       }
     }
   }
-  sadShapes = newSadShapes;
+  enemies = newEnemies;
 }
 
 function checkSpawn() {
   if ((frameCount - lastFrameCount) >= stagesSpawnIntervals[stage - 1]) {
-    dequeSadShape();
+    dequeEnemy();
     lastFrameCount = frameCount;
   }
 }
 
 function checkStage() {
-  if (score >= stage * 1000 && stage < 10) {
+  if (score >= stage * 1000 && stage < stagesSpawnIntervals.length) {
     stage += 1;
   }
 }
 
-function spawnSadShape(lane) {
+function spawnEnemy(lane) {
   // Randomly pick a lane to spawn a random shape
   let type = Math.floor(random(3));
   let x = lane * 100 + 40;
-  return new SadShape(x, -20, type, lane);
+  return new Enemy(x, -20, type, lane);
 }
 
-function dequeSadShape() {
+function dequeEnemy() {
   let lane = Math.floor(random(numLanes));
   let nextShape = shapeQueue[lane].shift();
   nextShape.setActive(true);
-  sadShapes.push(nextShape);
+  enemies.push(nextShape);
   shapeCounts[lane] += 1;
   enqueueNextWave();
   sendShapeSequence();
@@ -365,7 +371,7 @@ function sendShapeSequence() {
 function enqueueNextWave() {
   for (let i = 0; i < numLanes; i++) {
     if (shapeQueue[i].length == 0) {
-      shapeQueue[i].push(spawnSadShape(i));
+      shapeQueue[i].push(spawnEnemy(i));
     }
   }
 }

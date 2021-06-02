@@ -1,6 +1,6 @@
 const SHAPE_SIZE = 20;
 
-class SadShape extends Shape {
+class Enemy extends Shape {
   constructor(x, y, shape, lane) {
     super(x, y, SHAPE_SIZE, SHAPE_SIZE);
     this.speed = 1;
