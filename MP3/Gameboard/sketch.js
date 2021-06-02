@@ -87,6 +87,8 @@ function setup() {
   connectButton.addEventListener('click', function() {
     if (!serial.isOpen()) {
       serial.connectAndOpen(null, serialOptions);
+    } else {
+      serial.close();
     }
   });
 }
@@ -100,7 +102,7 @@ function onSerialConnectionOpened(eventSender) {
   serialWriteTextData("-1,-1,-1,-1,-1");
   connectButton.classList.remove("not-connected");
   connectButton.classList.add("connected");
-  connectButton.textContent = "Arduino connected";
+  connectButton.textContent = "Arduino connected. Click again to disconnect";
 }
 
 function onSerialConnectionClosed(eventSender) {
@@ -182,12 +184,14 @@ function keyPressed() {
       clearDrawingBoard();
     }
   }
-  if (keyIsDown(RIGHT_ARROW)) {
-    activeCannon = (activeCannon + 1) % numLanes;
-  } else if (keyIsDown(LEFT_ARROW)) {
-    activeCannon--;
-    if (activeCannon < 0) {
-      activeCannon = numLanes - 1;
+  if (!serial.isOpen()) {
+    if (keyIsDown(RIGHT_ARROW)) {
+      activeCannon = (activeCannon + 1) % numLanes;
+    } else if (keyIsDown(LEFT_ARROW)) {
+      activeCannon--;
+      if (activeCannon < 0) {
+        activeCannon = numLanes - 1;
+      }
     }
   }
 }
