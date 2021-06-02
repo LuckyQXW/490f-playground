@@ -4,6 +4,7 @@ html, body {
   margin: 0;
   padding: 0;
   background-color: #FFE6A0;
+  margin-bottom: 20px;
 }
 
 canvas {
@@ -103,6 +104,15 @@ h3 {
 
 .not-connected {
   background-color:#FFE6A0;
+}
+
+#clear-btn {
+  margin-top: 10px;
+  margin-left: 320px;
+  width: 200px;
+  height: 30px;
+  border: 2px black solid;
+  cursor: pointer;
 }
 
 .connected {

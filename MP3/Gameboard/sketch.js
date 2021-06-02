@@ -62,7 +62,7 @@ function setup() {
 
   // If we have previously approved ports, attempt to connect with them
   serial.autoConnectAndOpenPreviouslyApprovedPort(serialOptions);
-  receivedData = createDiv("Click anywhere to connect to serial port");
+  // receivedData = createDiv("Click anywhere to connect to serial port");
   // Set up cannons
   background(100);
   push();
@@ -78,10 +78,11 @@ function setup() {
   clearDrawingBoard();
 
   inputImage = createGraphics(32, 32);
-  clearButton = createButton("Clear");
+  clearButton = createButton("CLEAR");
   clearButton.mousePressed(function() {
     clearDrawingBoard();
   });
+  clearButton.id("clear-btn");
   noLoop();
   connectButton = document.getElementById("connect-btn");
   connectButton.addEventListener('click', function() {
@@ -94,11 +95,11 @@ function setup() {
 }
 
 function onSerialErrorOccurred(eventSender, error) {
-  receivedData.html(error);
+  // receivedData.html(error);
 }
 
 function onSerialConnectionOpened(eventSender) {
-  receivedData.html("Serial connection opened successfully");
+  // receivedData.html("Serial connection opened successfully");
   serialWriteTextData("-1,-1,-1,-1,-1");
   connectButton.classList.remove("not-connected");
   connectButton.classList.add("connected");
@@ -106,14 +107,14 @@ function onSerialConnectionOpened(eventSender) {
 }
 
 function onSerialConnectionClosed(eventSender) {
-  receivedData.html("onSerialConnectionClosed");
+  // receivedData.html("onSerialConnectionClosed");
   connectButton.classList.remove("connected");
   connectButton.classList.add("not-connected");
   connectButton.textContent = "Click to connect to Arduino";
 }
 
 function onSerialDataReceived(eventSender, newData) {
-  receivedData.html("onSerialDataReceived: " + newData);
+  // receivedData.html("onSerialDataReceived: " + newData);
   let direction = parseInt(newData);
   activeCannon += direction;
   if (activeCannon < 0) {
