@@ -29,6 +29,7 @@ let hasStroke = false;
 let serial; // the Serial object
 let serialOptions = { baudRate: 115200 };
 let receivedData;
+let connectButton;
 
 let bgMusic;
 
@@ -82,6 +83,12 @@ function setup() {
     clearDrawingBoard();
   });
   noLoop();
+  connectButton = document.getElementById("connect-btn");
+  connectButton.addEventListener('click', function() {
+    if (!serial.isOpen()) {
+      serial.connectAndOpen(null, serialOptions);
+    }
+  });
 }
 
 function onSerialErrorOccurred(eventSender, error) {
@@ -91,10 +98,16 @@ function onSerialErrorOccurred(eventSender, error) {
 function onSerialConnectionOpened(eventSender) {
   receivedData.html("Serial connection opened successfully");
   serialWriteTextData("-1,-1,-1,-1,-1");
+  connectButton.classList.remove("not-connected");
+  connectButton.classList.add("connected");
+  connectButton.textContent = "Arduino connected";
 }
 
 function onSerialConnectionClosed(eventSender) {
   receivedData.html("onSerialConnectionClosed");
+  connectButton.classList.remove("connected");
+  connectButton.classList.add("not-connected");
+  connectButton.textContent = "Click to connect to Arduino";
 }
 
 function onSerialDataReceived(eventSender, newData) {
@@ -113,12 +126,6 @@ function serialWriteTextData(textData) {
   if (serial.isOpen()) {
     console.log("Writing to serial: ", textData);
     serial.writeLine(textData);
-  }
-}
-
-function mouseClicked() {
-  if (!serial.isOpen()) {
-    serial.connectAndOpen(null, serialOptions);
   }
 }
 
@@ -317,7 +324,7 @@ function checkSpawn() {
 }
 
 function checkStage() {
-  if (score >= stage * 1000 && stage <= 10) {
+  if (score >= stage * 1000 && stage < 10) {
     stage += 1;
   }
 }

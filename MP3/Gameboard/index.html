@@ -17,6 +17,55 @@
   </head>
 
   <body>
+    <h1>Shape Defense</h1>
+    <div id='title-img'><img src='./assets/title_image.png' /></div>
+    <div id='content'>
+      <p>The Shape Army is invading! Let's work together to defend our stronghold!</p>
+      <div id='instructions'>
+        <h2>How to Play</h2>
+        <h3>The Magic Drawboard</h3>
+        <div class='side-by-side'>
+          <div class='left'>
+            <img src="./assets/drawboard.gif" />
+          </div>
+          <div class='right'>
+            <p>
+              Draw the shape for the ammo to be loaded next on the drawboard. Only
+              ammo of the correct shape can eliminate the incoming enemies!
+            </p>
+            <p>
+              Press SPACE to load ammo, or CLEAR to clear the drawboard
+            </p>
+          </div>
+        </div>
+        <h3>Playing with Arduino controllers</h3>
+        <div class='side-by-side'>
+          <div class='left'>
+            <img src="./assets/joystick.gif" />
+          </div>
+          <div class='right'>
+            <p>
+              Use Joystick to select a cannon.
+            </p>
+            <p>
+              The small OLED screen shows the next wave!
+            </p>
+          </div>
+        </div>
+        <button id='connect-btn' class='not-connected'>Click to connect to Arduino</button>
+        <h3>Playing with keyboard</h3>
+        <div class='side-by-side'>
+          <div class='left'>
+            <img src="https://i.gifer.com/ZQ6A.gif" />
+          </div>
+          <div class='right'>
+            <p>
+              Use left and right arrow keys to select a cannon.
+            </p>
+          </div>
+        </div>
+      </div>
+    </div>
     <script src="sketch.js"></script>
     <script src="shape.js"></script>
     <script src="cannon.js"></script>
