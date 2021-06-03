@@ -24,7 +24,7 @@ canvas {
 
 }
 
-p {
+p, button {
   font-family: 'Josefin Sans', sans-serif;
 }
 
@@ -117,4 +117,8 @@ h3 {
 
 .connected {
   background-color:#79EB00;
+}
+
+button {
+  font-size: 12pt;
 }

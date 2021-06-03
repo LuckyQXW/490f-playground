@@ -34,13 +34,12 @@ let connectButton;
 let bgMusic;
 let hitEffect;
 
-
 function preload() {
   bgMusic = createAudio('assets/brave_world.wav');
   bgMusic.volume(0.5);
   hitEffect = createAudio('assets/hit.wav');
   hitEffect.volume(0.5);
-  // set up ML model
+  // set up and load ML model
   const options = {
     inputs: [64, 64, 4],
     task: 'imageClassification'
@@ -68,9 +67,9 @@ function setup() {
   // If we have previously approved ports, attempt to connect with them
   serial.autoConnectAndOpenPreviouslyApprovedPort(serialOptions);
   // receivedData = createDiv("Click anywhere to connect to serial port");
-  // Set up cannons
-  background(100);
+  background(0);
   push();
+    // Set up cannons
     translate(500, 0);
     let x = 30;
     for (let i = 0; i < numLanes; i++) {
@@ -88,7 +87,7 @@ function setup() {
     clearDrawingBoard();
   });
   clearButton.id("clear-btn");
-  noLoop();
+
   connectButton = document.getElementById("connect-btn");
   connectButton.addEventListener('click', function() {
     if (!serial.isOpen()) {
@@ -97,6 +96,7 @@ function setup() {
       serial.close();
     }
   });
+  noLoop();
 }
 
 function onSerialErrorOccurred(eventSender, error) {
@@ -106,6 +106,7 @@ function onSerialErrorOccurred(eventSender, error) {
 function onSerialConnectionOpened(eventSender) {
   // receivedData.html("Serial connection opened successfully");
   serialWriteTextData("-1,-1,-1,-1,-1");
+  // Toggle the state of the connect button
   connectButton.classList.remove("not-connected");
   connectButton.classList.add("connected");
   connectButton.textContent = "Arduino connected. Click again to disconnect";
@@ -113,6 +114,7 @@ function onSerialConnectionOpened(eventSender) {
 
 function onSerialConnectionClosed(eventSender) {
   // receivedData.html("onSerialConnectionClosed");
+  // Toggle the state of the connect button
   connectButton.classList.remove("connected");
   connectButton.classList.add("not-connected");
   connectButton.textContent = "Click to connect to Arduino";
@@ -120,6 +122,7 @@ function onSerialConnectionClosed(eventSender) {
 
 function onSerialDataReceived(eventSender, newData) {
   // receivedData.html("onSerialDataReceived: " + newData);
+  // Receive joystick value (-1 = left, 1 = right)
   let direction = parseInt(newData);
   activeCannon += direction;
   if (activeCannon < 0) {
@@ -132,7 +135,7 @@ function onSerialDataReceived(eventSender, newData) {
 // Send text data over serial
 function serialWriteTextData(textData) {
   if (serial.isOpen()) {
-    console.log("Writing to serial: ", textData);
+    // console.log("Writing to serial: ", textData);
     serial.writeLine(textData);
   }
 }
@@ -141,6 +144,7 @@ function clearDrawingBoard() {
   strokeWeight(0);
   fill(255);
   rect(0, 0, 400, 400);
+  // Set up the dotted shape guidelines
   push();
     noFill();
     stroke(0);
@@ -155,7 +159,6 @@ function clearDrawingBoard() {
     rect(-100, -100, 200, 200);
     canvas.drawingContext.setLineDash([]);
   pop();
-  
   hasStroke = false;
 }
 
@@ -177,6 +180,7 @@ function resetGame() {
 }
 
 function keyPressed() {
+  // only start game after loading the model
   if (key == ' ' && modelReady) {
     if (isGameOver) {
       resetGame();
@@ -190,6 +194,7 @@ function keyPressed() {
       clearDrawingBoard();
     }
   }
+  // Enable keyboard control if Arduino is not connected
   if (!serial.isOpen()) {
     if (keyIsDown(RIGHT_ARROW)) {
       activeCannon = (activeCannon + 1) % numLanes;
@@ -203,6 +208,7 @@ function keyPressed() {
 }
 
 function draw() {
+  // Game area
   push();
     translate(500, 0);
     fill(220);
@@ -214,6 +220,7 @@ function draw() {
     updateCannons();
     drawScore();
   pop();
+  // Drawboard area
   strokeWeight(20);
   stroke(0);
   if (mouseIsPressed && onDrawingBoard()) {
@@ -240,6 +247,7 @@ function gotResults(err, results) {
   }
   // resultDiv.html(`${results[0].label}, ${results[0].confidence}`)
   push();
+    // Add color outline to the drawboard based on predicted label
     noFill();
     strokeWeight(5);
     switch(results[0].label) {
@@ -260,6 +268,7 @@ function gotResults(err, results) {
   pop();
 }
 
+// Returns true if the mouse is within the drawboard
 function onDrawingBoard() {
   return (pmouseX > 0 && pmouseX < 400 && mouseX > 0 && mouseX < 400 &&
          pmouseY > 0 && pmouseY < 400 && mouseY > 0 && mouseY < 400);
@@ -304,6 +313,7 @@ function updateEnemies() {
   let newEnemies = []
   for (let i = 0; i < enemies.length; i++) {
     enemies[i].update();
+    // Only keep enemies not yet arrived at the cannon
     if (enemies[i].getBottom() < height - 60 && enemies[i].isActive()) {
       newEnemies.push(enemies[i]);
       enemies[i].draw();
@@ -311,8 +321,10 @@ function updateEnemies() {
       shapeCounts[enemies[i].getLane()] -= 1;
       // Once any shape reaches a cannon, lives -1
       lives--;
+      // Send to arduino for vibration
       serialWriteTextData("b");
       if (lives == 0) {
+        // Game over
         isGameOver = true;
         serialWriteTextData("-1,-1,-1,-1,-1");
         bgMusic.stop();
@@ -335,6 +347,7 @@ function checkSpawn() {
 }
 
 function checkStage() {
+  // Increment stage every 1000 points earned
   if (score >= stage * 1000 && stage < stagesSpawnIntervals.length) {
     stage += 1;
   }
@@ -358,6 +371,11 @@ function dequeEnemy() {
 }
 
 function sendShapeSequence() {
+  // Sends the next wave sequence to arduino in the format of #,#,#,#,#
+  // -1: No shape
+  // 0: circle
+  // 1: square
+  // 2: triangle
   let sequence = '';
   for (let i = 0; i < numLanes; i++) {
     sequence += shapeQueue[i][0].getShape();
@@ -370,6 +388,7 @@ function sendShapeSequence() {
 
 function enqueueNextWave() {
   for (let i = 0; i < numLanes; i++) {
+    // Gets a random shape into the queue if any of them are empty
     if (shapeQueue[i].length == 0) {
       shapeQueue[i].push(spawnEnemy(i));
     }
@@ -417,10 +436,5 @@ function drawScore() {
     fill(255);
     let yText = height / 3;
     text('Press SPACE BAR to play!', width / 4, yText);
-    yText += 50;
-    textSize(15);
-    text('Player 1 draw ammo shapes and press space to load cannons', width / 4, yText);
-    yText += 30;
-    text('Player 2 choose the cannon and watch out for next wave', width / 4, yText);
   }
 }
